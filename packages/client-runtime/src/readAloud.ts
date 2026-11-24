@@ -161,6 +161,38 @@ export function createTimedWords(input: {
   };
 }
 
+export type ReadAloudState = {
+  readonly id: string | null;
+  readonly status: "idle" | "loading" | "playing" | "paused" | "error";
+  readonly error?: string;
+  /** Whether this reading has played audio, so a later wait is a gap and not the first load. */
+  readonly started?: boolean;
+};
+
+/**
+ * What the read-aloud button of message `id` does: start reading, cancel the first speech
+ * generation, pause, or resume. `stoppable` adds a separate Stop control while the message plays
+ * or is paused.
+ */
+export function readAloudButtonMode(
+  state: ReadAloudState,
+  id: string,
+): { readonly action: "read" | "cancel" | "pause" | "resume"; readonly stoppable: boolean } {
+  if (state.id !== id) return { action: "read", stoppable: false };
+  switch (state.status) {
+    case "playing":
+      return { action: "pause", stoppable: true };
+    case "paused":
+      return { action: "resume", stoppable: true };
+    case "loading":
+      return state.started
+        ? { action: "pause", stoppable: true }
+        : { action: "cancel", stoppable: false };
+    default:
+      return { action: "read", stoppable: false };
+  }
+}
+
 export function createReadAloudController(
   prepare: (
     text: string,
@@ -171,12 +203,7 @@ export function createReadAloudController(
   ) => Promise<SpeechPlayback>,
   resolve: MFunctionType = mFallback,
 ) {
-  type State = {
-    id: string | null;
-    status: "idle" | "loading" | "playing" | "paused" | "error";
-    error?: string;
-  };
-  let state: State = { id: null, status: "idle" };
+  let state: ReadAloudState = { id: null, status: "idle" };
   let active: AbortController | null = null;
   let playback: SpeechPlayback | null = null;
   let disposing = false;
@@ -198,7 +225,7 @@ export function createReadAloudController(
       });
   };
   const listeners = new Set<() => void>();
-  const publish = (next: State) => {
+  const publish = (next: ReadAloudState) => {
     state = next;
     for (const listener of listeners) listener();
   };
@@ -261,9 +288,10 @@ export function createReadAloudController(
     if (!chunks.length) return;
     const owner = new AbortController();
     active = owner;
+    let started = false;
     try {
       for (const chunk of chunks) {
-        publish({ id, status: paused ? "paused" : "loading" });
+        publish({ id, status: paused ? "paused" : "loading", started });
         const chunkEnd = chunk.start + chunk.text.length;
         const blocks = speech.blocks
           .filter((block) => block.spokenStart >= chunk.start && block.spokenEnd <= chunkEnd)
@@ -299,7 +327,8 @@ export function createReadAloudController(
             if (active !== owner) return;
           } else break;
         } while (active === owner);
-        publish({ id, status: "playing" });
+        started = true;
+        publish({ id, status: "playing", started });
         await next.finished;
         if (active !== owner) return;
         stopFollowing();
