@@ -3211,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
+      "c": [
+        " ",
+        "sur l’ordinateur qui a ouvert cette page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3223,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quiconque l’exécute obtient cet accès"]
+      "c": [
+        " ",
+        "· quiconque l’exécute obtient cet accès"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -12932,5 +12938,6 @@
   ],
   "1405f6ff92c1041a": "Impossible de modifier le modèle. Réessayez.",
   "a3f488b311b42bbf": "Actions sur la sélection",
-  "a60a03c2d5907920": "Lire à partir d'ici"
+  "a60a03c2d5907920": "Lire à partir d'ici",
+  "e5ad64bb69db1045": "Mettre la lecture en pause"
 }

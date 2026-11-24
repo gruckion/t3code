@@ -3211,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3223,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -12941,5 +12947,6 @@
   ],
   "1405f6ff92c1041a": "Could not change the model. Try again.",
   "a3f488b311b42bbf": "Selection actions",
-  "a60a03c2d5907920": "Read from here"
+  "a60a03c2d5907920": "Read from here",
+  "e5ad64bb69db1045": "Pause reading"
 }

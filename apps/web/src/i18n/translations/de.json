@@ -3212,7 +3212,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
+      "c": [
+        " ",
+        "auf dem Computer, der diese Seite geöffnet hat"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3224,7 +3227,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
+      "c": [
+        " ",
+        "· wer es ausführt, erhält diesen Zugriff"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -12932,5 +12938,6 @@
   ],
   "1405f6ff92c1041a": "Das Modell konnte nicht geändert werden. Versuchen Sie es erneut.",
   "a3f488b311b42bbf": "Auswahlaktionen",
-  "a60a03c2d5907920": "Ab hier vorlesen"
+  "a60a03c2d5907920": "Ab hier vorlesen",
+  "e5ad64bb69db1045": "Vorlesen pausieren"
 }

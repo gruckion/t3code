@@ -3211,7 +3211,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "en el ordenador que abrió esta página"]
+      "c": [
+        " ",
+        "en el ordenador que abrió esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3223,7 +3226,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quien lo ejecute obtiene este acceso"]
+      "c": [
+        " ",
+        "· quien lo ejecute obtiene este acceso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -12927,5 +12933,6 @@
   ],
   "1405f6ff92c1041a": "No se pudo cambiar el modelo. Inténtalo de nuevo.",
   "a3f488b311b42bbf": "Acciones de selección",
-  "a60a03c2d5907920": "Leer desde aquí"
+  "a60a03c2d5907920": "Leer desde aquí",
+  "e5ad64bb69db1045": "Pausar lectura"
 }
