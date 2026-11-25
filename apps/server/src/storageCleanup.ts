@@ -56,6 +56,11 @@ import { MAX_OVERDUE_ARM_MS } from "./orchestration-v2/UsageLimitRecoveryWorker.
 import * as WorktreeBranchSync from "./orchestration-v2/WorktreeBranchSync.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
+import { readAloudCacheDirectory } from "./speech/readAloudCache.ts";
+import {
+  makeReadAloudCachePruner,
+  READ_ALOUD_CACHE_MAX_BYTES,
+} from "./speech/readAloudCacheCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -2001,6 +2006,49 @@ const make = Effect.gen(function* () {
     return removed;
   });
 
+  const pruneReadAloudCache = yield* makeReadAloudCachePruner;
+  // Every sweep, with no setting: the cache only ever holds audio that can be made again.
+  const cleanReadAloudCache = Effect.fn("StorageCleanup.cleanReadAloudCache")(function* (
+    now: number,
+    entries: StorageCleanupReportEntry[],
+  ) {
+    const entry = {
+      kind: "read-aloud-cache" as const,
+      path: null,
+      projectPath: null,
+      threadId: null,
+      threadTitle: null,
+    };
+    yield* pruneReadAloudCache({
+      directory: readAloudCacheDirectory(path, config.stateDir),
+      now,
+      maxBytes: READ_ALOUD_CACHE_MAX_BYTES,
+    }).pipe(
+      Effect.map(({ files, bytes }) => {
+        if (files === 0) return;
+        entries.push({
+          ...entry,
+          outcome: "removed",
+          reason: `Removed ${files} read aloud ${files === 1 ? "entry" : "entries"}`,
+          bytes,
+          files,
+        });
+      }),
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          entries.push({
+            ...entry,
+            outcome: "failed",
+            reason: cleanupFailureReason(error),
+            bytes: null,
+            files: null,
+          });
+          yield* Effect.logWarning("read aloud cache cleanup failed", { error });
+        }),
+      ),
+    );
+  });
+
   const reportRef = yield* SubscriptionRef.make<StorageCleanupReport | null>(null);
   const cleanCheckpointRefs = Effect.fn("StorageCleanup.cleanCheckpointRefs")(function* () {
     // Forks display their source history even after its thread is deleted. Keep
@@ -2218,6 +2266,7 @@ const make = Effect.gen(function* () {
         ),
       );
     }
+    yield* cleanReadAloudCache(now, entries);
     const counts = { removed: 0, kept: 0, failed: 0 };
     let bytesFreed = 0;
     for (const entry of entries) {

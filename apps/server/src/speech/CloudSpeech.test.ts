@@ -11,6 +11,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { expect, vi } from "vite-plus/test";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CloudSpeech from "./CloudSpeech.ts";
+import * as ReadAloudCache from "./readAloudCache.ts";
 
 // ElevenLabs takes its key in its own header; the others take a bearer token.
 const sentKey = (init: RequestInit | undefined) => {
@@ -33,6 +34,7 @@ it.effect.each(["openai", "xai", "elevenlabs"] as const)(
       const service = yield* CloudSpeech.CloudSpeech.pipe(
         Effect.provide(
           CloudSpeech.layer.pipe(
+            Layer.provide(ReadAloudCache.layerDisabled),
             Layer.provide(NodeServices.layer),
             Layer.provide(FetchHttpClient.layer),
             Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
@@ -161,6 +163,7 @@ it.effect.each([
       const service = yield* CloudSpeech.CloudSpeech.pipe(
         Effect.provide(
           CloudSpeech.layer.pipe(
+            Layer.provide(ReadAloudCache.layerDisabled),
             Layer.provide(NodeServices.layer),
             Layer.provide(FetchHttpClient.layer),
             Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
@@ -194,6 +197,7 @@ it.effect("splits CJK replies below gpt-4o-mini-tts's token limit", () =>
     const service = yield* CloudSpeech.CloudSpeech.pipe(
       Effect.provide(
         CloudSpeech.layer.pipe(
+          Layer.provide(ReadAloudCache.layerDisabled),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
           Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
@@ -229,6 +233,7 @@ it.effect("uploads to OpenRouter only for a listed exact model, as zero-retentio
     const service = yield* CloudSpeech.CloudSpeech.pipe(
       Effect.provide(
         CloudSpeech.layer.pipe(
+          Layer.provide(ReadAloudCache.layerDisabled),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
           Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
@@ -288,6 +293,7 @@ it.effect("removing a key while a catalog read is pending prevents the upload", 
     const service = yield* CloudSpeech.CloudSpeech.pipe(
       Effect.provide(
         CloudSpeech.layer.pipe(
+          Layer.provide(ReadAloudCache.layerDisabled),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
           Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
