@@ -58,6 +58,7 @@ import {
 import { SettingsRow, SettingsSearchTarget, SettingsSection } from "./settingsLayout";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useCloudRead } from "./CloudVoiceConfiguration";
+import { ReadAloudCleanerSettings } from "./ReadAloudCleanerSettings";
 import { ReadAloudKeyDialog } from "./ReadAloudKeyDialog";
 import { SpeechProviderIcon } from "./SpeechProviderIcon";
 
@@ -728,7 +729,7 @@ export function ReadAloudSettingsSection() {
           <SettingsRow
             title={gt("Skip code blocks")}
             description={gt(
-              "Read the prose and inline identifiers without narrating fenced code blocks.",
+              "Read the prose and inline identifiers without fenced code blocks. When this is off and the speech cleaner has a narration model, cloud voices read a short summary of each code block instead of the code.",
             )}
             control={
               <Switch
@@ -738,6 +739,9 @@ export function ReadAloudSettingsSection() {
               />
             }
           />
+          {cloudProvider && selectedEnvironment && (
+            <ReadAloudCleanerSettings environmentId={selectedEnvironment.environmentId} />
+          )}
           <SettingsRow
             title={gt("Preview", { $context: "noun, a sample of the voice" })}
             description={
