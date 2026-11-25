@@ -182,6 +182,13 @@ it.effect("reads a collected reference again once it is invalidated", () =>
           openrouter: "",
           elevenlabs: "",
         },
+        readAloudCleaner: {
+          jevApiKey: "",
+          narrationModel: "",
+          narrationBaseUrl: "",
+          narrationApiKey: "",
+          disabledRules: [],
+        },
         usageLimitSources,
         textGenerators: {},
         easDeviceHosts,

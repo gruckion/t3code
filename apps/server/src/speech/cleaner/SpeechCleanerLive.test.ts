@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest";
+import { ReadAloudCleanerRule } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -289,3 +290,7 @@ it.effect("table cells reach the narrator with paths cleaned and links as their 
     });
   }),
 );
+
+it("settings can turn off every rule the cleaner runs", () => {
+  expect(SpeechCleanerLive.ruleIds).toEqual(ReadAloudCleanerRule.literals);
+});

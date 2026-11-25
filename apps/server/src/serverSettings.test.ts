@@ -1967,6 +1967,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           github: { tokens: { "github.com": personal("GitHub/token"), "ghe.acme.test": work } },
         },
         cloudSpeechCredentials: { openai: personal("Voice/key"), xai: work },
+        readAloudCleaner: { jevApiKey: personal("Jev/key"), narrationApiKey: work },
         usageLimitSources: {
           [hub]: {
             kind: "cliproxy",
@@ -2017,6 +2018,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         openrouter: "",
         elevenlabs: "",
       });
+      assert.equal(removed.readAloudCleaner.jevApiKey, "");
+      assert.deepEqual(removed.readAloudCleaner.narrationApiKey, work);
       assert.equal(removed.easDeviceHosts[0]?.accessToken, "");
       assert.deepEqual(Object.keys(removed.secretProviders), ["work"]);
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
@@ -2030,6 +2033,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         "cloudSpeechCredentials.xai",
         "cloudSpeechCredentials.openrouter",
         "cloudSpeechCredentials.elevenlabs",
+        "readAloudCleaner.jevApiKey",
+        "readAloudCleaner.narrationApiKey",
         "easDeviceHosts.[].accessToken",
         "simlockDeviceHosts.[].agentToken",
         "usageLimitSources.*.managementKey",

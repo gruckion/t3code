@@ -1393,6 +1393,37 @@ export const CloudSpeechCredentials = Schema.Struct({
   elevenlabs: CloudSpeechCredential,
 });
 
+/** The speech cleaner's rules, in the order they run, as their rule ids. */
+export const ReadAloudCleanerRule = Schema.Literals([
+  "code-blocks",
+  "urls",
+  "migration-files",
+  "hashes",
+  "file-paths",
+  "separators",
+  "markdown-tables",
+  "blockquotes",
+  "comparisons",
+]);
+export type ReadAloudCleanerRule = typeof ReadAloudCleanerRule.Type;
+
+/**
+ * Rewrites replies for speech before cloud read aloud. Empty keys fall back to the
+ * `TYPESAFE_API_KEY` and `READ_ALOUD_LLM_*` environment variables.
+ */
+export const ReadAloudCleanerSettings = Schema.Struct({
+  /** Jev classifies hashes and code; the cleaner is off without it. */
+  jevApiKey: CloudSpeechCredential,
+  /** An OpenAI-compatible model that narrates tables and code; narration is off without one. */
+  narrationModel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  narrationBaseUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  narrationApiKey: CloudSpeechCredential,
+  disabledRules: Schema.Array(ReadAloudCleanerRule).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type ReadAloudCleanerSettings = typeof ReadAloudCleanerSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1434,6 +1465,17 @@ export const ServerSettings = Schema.Struct({
   cloudSpeechCredentials: CloudSpeechCredentials.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({ openai: "", xai: "", openrouter: "", elevenlabs: "" }),
+    ),
+  ),
+  readAloudCleaner: ReadAloudCleanerSettings.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        jevApiKey: "",
+        narrationModel: "",
+        narrationBaseUrl: "",
+        narrationApiKey: "",
+        disabledRules: [],
+      }),
     ),
   ),
   speechModelId: Schema.String.pipe(
@@ -1909,6 +1951,15 @@ export const ServerSettingsPatch = Schema.Struct({
       xai: Schema.optionalKey(SettingsSecretValue),
       openrouter: Schema.optionalKey(SettingsSecretValue),
       elevenlabs: Schema.optionalKey(SettingsSecretValue),
+    }),
+  ),
+  readAloudCleaner: Schema.optionalKey(
+    Schema.Struct({
+      jevApiKey: Schema.optionalKey(SettingsSecretValue),
+      narrationModel: Schema.optionalKey(TrimmedString),
+      narrationBaseUrl: Schema.optionalKey(TrimmedString),
+      narrationApiKey: Schema.optionalKey(SettingsSecretValue),
+      disabledRules: Schema.optionalKey(Schema.Array(ReadAloudCleanerRule)),
     }),
   ),
   speechModelId: Schema.optionalKey(Schema.String),

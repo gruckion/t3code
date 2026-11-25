@@ -46,7 +46,9 @@ const cacheIn = (directory: string) =>
 const withCleaner = (directory: string, cleaner: SpeechCleaner.SpeechCleaner["Service"]) =>
   Layer.effect(
     ReadAloudSpeechText.ReadAloudSpeechText,
-    ReadAloudSpeechText.makeWithCleaner(cleaner, ["test"]),
+    ReadAloudSpeechText.makeWithCleaner(
+      Effect.succeed({ service: cleaner, configuration: ["test"] }),
+    ),
   ).pipe(Layer.provide(cacheIn(directory)));
 
 const speak = (markdown: string, plain: string) =>
@@ -61,20 +63,47 @@ const speak = (markdown: string, plain: string) =>
   );
 
 describe("read aloud speech text", () => {
-  it.effect("reads plain text when no cleaner key is set", () =>
-    Effect.gen(function* () {
-      const directory = yield* tempDirectory;
-      const block = yield* speak("Open `src/main.ts`.", "Open src/main.ts.").pipe(
-        Effect.provide(
-          ReadAloudSpeechText.layer.pipe(
-            Layer.provide(cacheIn(directory)),
-            Layer.provide(FetchHttpClient.layer),
-            Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+  it.effect(
+    "turns on from settings without a restart, and a rule toggled off reads as written",
+    () =>
+      Effect.gen(function* () {
+        const directory = yield* tempDirectory;
+        const upstream = vi.fn<typeof fetch>(async () => new Response("offline", { status: 503 }));
+        const program = Effect.gen(function* () {
+          const settings = yield* ServerSettings.ServerSettingsService;
+          // No Jev key in settings or the environment: the block reads as its plain text.
+          expect(yield* speak("Open `src/main.ts`.", "Open src/main.ts.")).toEqual({
+            text: "Open src/main.ts.",
+            words: ["Open", "src/main.ts."],
+          });
+          yield* settings.updateSettings({ readAloudCleaner: { jevApiKey: "jev-key" } });
+          expect((yield* speak("Open `src/main.ts`.", "Open src/main.ts.")).text).toBe(
+            "Open src main.ts.",
+          );
+          yield* settings.updateSettings({ readAloudCleaner: { disabledRules: ["file-paths"] } });
+          expect((yield* speak("Open `src/other.ts`.", "Open src/other.ts.")).text).toBe(
+            "Open src/other.ts.",
+          );
+          yield* settings.updateSettings({ readAloudCleaner: { jevApiKey: "" } });
+          expect((yield* speak("Open `src/third.ts`.", "Open src/third.ts.")).text).toBe(
+            "Open src/third.ts.",
+          );
+        });
+        yield* program.pipe(
+          Effect.provide(
+            ReadAloudSpeechText.layer.pipe(
+              Layer.provideMerge(ServerSettings.ServerSettingsService.layerTest()),
+              Layer.provide(cacheIn(directory)),
+              Layer.provide(Layer.mock(SecretResolver.SecretResolver)({})),
+              Layer.provide(FetchHttpClient.layer),
+              Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+            ),
           ),
-        ),
-      );
-      expect(block).toEqual({ text: "Open src/main.ts.", words: ["Open", "src/main.ts."] });
-    }).pipe(Effect.scoped),
+          Effect.provideService(FetchHttpClient.Fetch, upstream),
+        );
+        // Paths need no classifier, so nothing left this machine.
+        expect(upstream).not.toHaveBeenCalled();
+      }).pipe(Effect.scoped),
   );
 
   it.effect("rewrites a block once and reads the cached rewrite after a restart", () =>

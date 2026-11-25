@@ -42,12 +42,17 @@ const replacers: ReadonlyArray<
   comparisons,
 ];
 
+/** Settings name rules by these ids, in the order they run. */
+export const ruleIds = replacers.map((rule) => rule.id);
+
 /** Needs an `HttpClient`; the server provides `FetchHttpClient.layer` once for all features. */
 export const layer = (
   settings: Provider.ProviderSettings,
   timeouts: (typeof CleanerTimeouts)["Service"] = CleanerTimeouts.defaultValue(),
+  /** Rule ids that leave their text unchanged. */
+  disabledRules: ReadonlyArray<string> = [],
 ) =>
-  SpeechCleaner.layer(replacers).pipe(
+  SpeechCleaner.layer(replacers.filter((rule) => !disabledRules.includes(rule.id))).pipe(
     Layer.provide(Provider.narratorLayer(settings)),
     Layer.provide(Layer.succeed(CleanerTimeouts, timeouts)),
   );

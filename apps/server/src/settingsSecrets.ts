@@ -2,6 +2,7 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CloudSpeechCredentials,
+  ReadAloudCleanerSettings,
   CodexSettings,
   EasDeviceHostConfig,
   type ProviderInstanceConfig,
@@ -13,6 +14,7 @@ import {
   isSecretReference,
   secretSettingsFields,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
 import { grokClient } from "@t3tools/provider-grok/client";
@@ -49,6 +51,8 @@ const providerSecretFields = new Map([
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
 const textGeneratorSecretFields = secretSettingsFields(TextGeneratorConfig);
 const voiceSecretFields = secretSettingsFields(CloudSpeechCredentials);
+const readAloudCleanerSecretFields = secretSettingsFields(ReadAloudCleanerSettings);
+const decodeReadAloudCleaner = Schema.decodeUnknownSync(ReadAloudCleanerSettings);
 const easDeviceHostSecretFields = secretSettingsFields(EasDeviceHostConfig);
 const simlockDeviceHostSecretFields = secretSettingsFields(SimlockDeviceHostConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
@@ -254,6 +258,13 @@ function mapSecretFieldGroups(
       voiceSecretFields,
       (provider) => `voice-cloud-${provider}`,
     ) as ServerSettings["cloudSpeechCredentials"],
+    readAloudCleaner: decodeReadAloudCleaner(
+      mapFields(
+        settings.readAloudCleaner,
+        readAloudCleanerSecretFields,
+        (field) => `read-aloud-cleaner-${field}`,
+      ),
+    ),
     providerInstances,
     sourceControlHosts,
     usageLimitSources,
