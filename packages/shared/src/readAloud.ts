@@ -18,6 +18,8 @@ export interface ReadAloudBlock {
   readonly spokenEnd: number;
   readonly sourceStart: number;
   readonly sourceEnd: number;
+  /** Markdown that reads as this block on its own; a table row is its cells joined by commas. */
+  readonly markdown: string;
 }
 
 export interface ReadAloudSpeech {
@@ -66,6 +68,18 @@ function located(markdown: string, value: string, node: Positioned): Run {
   };
 }
 
+/** A table cell's own markdown, without the pipes around it. */
+function cellMarkdown(markdown: string, cell: Positioned) {
+  const start = cell.position?.start.offset;
+  const end = cell.position?.end.offset;
+  if (start === undefined || end === undefined) return "";
+  return markdown
+    .slice(start, end)
+    .replace(/^\s*\|/, "")
+    .replace(/(?<!\\)\|\s*$/, "")
+    .trim();
+}
+
 /**
  * Plain text with one sentence per line, and where each spoken character came from in the
  * markdown. Speech engines read newlines as spaces, so every heading, paragraph, list item, and
@@ -79,7 +93,7 @@ export function readAloudSpeech(markdown: string, skipCodeBlocks: boolean): Read
     text += run.text;
     sources.push(...run.sources);
   };
-  const speak = (run: Run, node: Positioned) => {
+  const speak = (run: Run, node: Positioned, own?: string) => {
     let spokenStart: number | null = null;
     let lineStart = 0;
     while (lineStart <= run.text.length) {
@@ -105,7 +119,13 @@ export function readAloudSpeech(markdown: string, skipCodeBlocks: boolean): Read
     const sourceStart = node.position?.start.offset;
     const sourceEnd = node.position?.end.offset;
     if (spokenStart !== null && sourceStart !== undefined && sourceEnd !== undefined)
-      blocks.push({ spokenStart, spokenEnd: text.length, sourceStart, sourceEnd });
+      blocks.push({
+        spokenStart,
+        spokenEnd: text.length,
+        sourceStart,
+        sourceEnd,
+        markdown: own ?? markdown.slice(sourceStart, sourceEnd),
+      });
   };
   const inline = (node: RootContent): Run => {
     if (node.type === "break") return added("\n");
@@ -116,17 +136,16 @@ export function readAloudSpeech(markdown: string, skipCodeBlocks: boolean): Read
   };
   const block = (node: Root | RootContent) => {
     if (node.type === "paragraph" || node.type === "heading") speak(inline(node), node);
-    else if (node.type === "tableRow")
+    else if (node.type === "tableRow") {
+      const cells = node.children
+        .map((cell) => ({ run: trim(inline(cell)), cell }))
+        .filter(({ run }) => run.text);
       speak(
-        concat(
-          node.children
-            .map((cell) => trim(inline(cell)))
-            .filter((cell) => cell.text)
-            .flatMap((cell, index) => (index ? [added(", "), cell] : [cell])),
-        ),
+        concat(cells.flatMap(({ run }, index) => (index ? [added(", "), run] : [run]))),
         node,
+        cells.map(({ cell }) => cellMarkdown(markdown, cell)).join(", "),
       );
-    else if (node.type === "code") {
+    } else if (node.type === "code") {
       if (!skipCodeBlocks) speak(located(markdown, node.value, node), node);
     } else if (node.type !== "html" && node.type !== "definition" && "children" in node)
       for (const child of node.children) block(child);

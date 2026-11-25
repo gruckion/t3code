@@ -67,6 +67,12 @@ it("maps each spoken word back to its markdown, leaving added punctuation unmapp
     ["c, d.", "| c | d |"],
     ["code();", "```ts\ncode();\n```"],
   ]);
+  // Each block's markdown reads as the block on its own, so it can be rewritten for speech alone.
+  for (const block of speech.blocks)
+    expect(readAloudSpeech(block.markdown, false).text).toBe(
+      speech.text.slice(block.spokenStart, block.spokenEnd),
+    );
+  expect(speech.blocks.map((block) => block.markdown).slice(3, 5)).toEqual(["a, b", "c, d"]);
 });
 
 it("locates a spoken word by markdown range and by its repeats in the block", () => {
