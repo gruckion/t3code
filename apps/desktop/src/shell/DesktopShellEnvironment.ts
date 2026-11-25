@@ -128,6 +128,11 @@ const LOGIN_SHELL_ENV_NAMES = [
   "__MISE_DIFF",
   "JAVA_HOME",
   "PNPM_HOME",
+  // The read-aloud speech cleaner on the bundled server.
+  "TYPESAFE_API_KEY",
+  "READ_ALOUD_LLM_API_KEY",
+  "READ_ALOUD_LLM_MODEL",
+  "READ_ALOUD_LLM_BASE_URL",
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = [
   "PATH",
