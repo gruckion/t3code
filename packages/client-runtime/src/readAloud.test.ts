@@ -383,3 +383,27 @@ it("follows provider word timings on the audio clock and estimates them when the
     vi.useRealTimers();
   }
 });
+
+it("sends the blocks it reads, so a jump requests the same blocks a full read did", async () => {
+  const markdown = "First `a/b`.\n\nSecond one.\n\n| Name | Path |\n| - | - |\n| x | `c/d` |";
+  const calls: Array<{
+    readonly text: string;
+    readonly blocks: ReadonlyArray<{ start: number; end: number; markdown: string }>;
+  }> = [];
+  const controller = createReadAloudController(async (text, _settings, _signal, blocks) => {
+    calls.push({ text, blocks });
+    return { play: async () => {}, pause: () => {}, stop: () => {}, finished: Promise.resolve() };
+  });
+  const settings = { ...DEFAULT_READ_ALOUD_SETTINGS, provider: "elevenlabs" as const };
+  await controller.start("1", markdown, settings);
+  await controller.start("1", markdown, settings, markdown.indexOf("Second"));
+  const pieces = (call: (typeof calls)[number] | undefined) =>
+    call?.blocks.map((block) => [call.text.slice(block.start, block.end), block.markdown]);
+  expect(pieces(calls[0])).toEqual([
+    ["First a/b.", "First `a/b`."],
+    ["Second one.", "Second one."],
+    ["Name, Path.", "Name, Path"],
+    ["x, c/d.", "x, `c/d`"],
+  ]);
+  expect(pieces(calls[1])).toEqual(pieces(calls[0])?.slice(1));
+});

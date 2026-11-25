@@ -81,72 +81,76 @@ export const warmReadAloud = createReadAloudWarmup(async (environmentId, model) 
   await runEnvironmentSpeech(prepareSpeechSynthesis(prepared, model));
 });
 
-export const readAloudController = createReadAloudController(async (text, settings, signal) => {
-  if (settings.provider === "system")
-    return systemPlayback(text, settings.voice, settings.speed, settings.language);
-  if (settings.provider === "off") throw new Error("Enable read aloud in Settings → Voice.");
-  const prepared = settings.environmentId ? readPreparedConnection(settings.environmentId) : null;
-  if (!prepared)
-    throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
-  let pendingCatalog = catalogs.get(signal);
-  if (!pendingCatalog) {
-    pendingCatalog = runEnvironmentSpeech(getSpeechSynthesisModels(prepared, settings.provider), {
-      signal,
+export const readAloudController = createReadAloudController(
+  async (text, settings, signal, blocks) => {
+    if (settings.provider === "system")
+      return systemPlayback(text, settings.voice, settings.speed, settings.language);
+    if (settings.provider === "off") throw new Error("Enable read aloud in Settings → Voice.");
+    const prepared = settings.environmentId ? readPreparedConnection(settings.environmentId) : null;
+    if (!prepared)
+      throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
+    let pendingCatalog = catalogs.get(signal);
+    if (!pendingCatalog) {
+      pendingCatalog = runEnvironmentSpeech(getSpeechSynthesisModels(prepared, settings.provider), {
+        signal,
+      });
+      catalogs.set(signal, pendingCatalog);
+    }
+    const catalog = await pendingCatalog;
+    signal.throwIfAborted();
+    if (catalog.error) throw new Error(catalog.error);
+    const model = settings.model || catalog.defaultModel;
+    const { url, token } = await runEnvironmentSpeech(
+      startSpeechSynthesis(prepared, settings.provider, {
+        text,
+        model,
+        voice: settings.voice,
+        speed: settings.speed,
+        language: settings.language,
+        blocks,
+      }),
+      { signal },
+    );
+    signal.throwIfAborted();
+    const audio = new Audio(url);
+    if (!speechSpeedAppliedByProvider(catalog, model)) audio.playbackRate = settings.speed;
+    let done: () => void = () => {};
+    const finished = new Promise<void>((resolve, reject) => {
+      done = resolve;
+      audio.onended = () => resolve();
+      audio.onerror = () => reject(new Error("Could not play the generated speech."));
     });
-    catalogs.set(signal, pendingCatalog);
-  }
-  const catalog = await pendingCatalog;
-  signal.throwIfAborted();
-  if (catalog.error) throw new Error(catalog.error);
-  const model = settings.model || catalog.defaultModel;
-  const { url, token } = await runEnvironmentSpeech(
-    startSpeechSynthesis(prepared, settings.provider, {
-      text,
-      model,
-      voice: settings.voice,
-      speed: settings.speed,
-      language: settings.language,
-    }),
-    { signal },
-  );
-  signal.throwIfAborted();
-  const audio = new Audio(url);
-  if (!speechSpeedAppliedByProvider(catalog, model)) audio.playbackRate = settings.speed;
-  let done: () => void = () => {};
-  const finished = new Promise<void>((resolve, reject) => {
-    done = resolve;
-    audio.onended = () => resolve();
-    audio.onerror = () => reject(new Error("Could not play the generated speech."));
-  });
-  let timed: ReturnType<typeof createTimedWords> | null = null;
-  return {
-    play: () => audio.play(),
-    pause: () => audio.pause(),
-    stop: () => {
-      if (timed) for (const type of CLOCK_EVENTS) audio.removeEventListener(type, timed.refresh);
-      timed?.stop();
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-      done();
-    },
-    finished,
-    words: (listener) => {
-      if (!timed) {
-        timed = createTimedWords({
-          text,
-          wordTimings: catalog.wordTimings ?? "estimated",
-          load: (after, signal) =>
-            runEnvironmentSpeech(getSpeechSynthesisTimings(prepared, token, after), { signal }),
-          clock: () => ({
-            seconds: audio.currentTime,
-            rate: audio.playbackRate,
-            playing: !audio.paused,
-          }),
-        });
-        for (const type of CLOCK_EVENTS) audio.addEventListener(type, timed.refresh);
-      }
-      return timed.subscribe(listener);
-    },
-  };
-}, m);
+    let timed: ReturnType<typeof createTimedWords> | null = null;
+    return {
+      play: () => audio.play(),
+      pause: () => audio.pause(),
+      stop: () => {
+        if (timed) for (const type of CLOCK_EVENTS) audio.removeEventListener(type, timed.refresh);
+        timed?.stop();
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        done();
+      },
+      finished,
+      words: (listener) => {
+        if (!timed) {
+          timed = createTimedWords({
+            text,
+            wordTimings: catalog.wordTimings ?? "estimated",
+            load: (after, signal) =>
+              runEnvironmentSpeech(getSpeechSynthesisTimings(prepared, token, after), { signal }),
+            clock: () => ({
+              seconds: audio.currentTime,
+              rate: audio.playbackRate,
+              playing: !audio.paused,
+            }),
+          });
+          for (const type of CLOCK_EVENTS) audio.addEventListener(type, timed.refresh);
+        }
+        return timed.subscribe(listener);
+      },
+    };
+  },
+  m,
+);

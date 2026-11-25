@@ -62,12 +62,26 @@ export const ReadAloudPreference = ReadAloudSettings.pipe(
 export const SPEECH_SYNTHESIS_MAX_TEXT = 32_000;
 /** Serves a started synthesis as one MP3 stream that native players read while it is produced. */
 export const SPEECH_SYNTHESIS_AUDIO_PATH = "/api/voice/synthesis/audio";
+/**
+ * A block of the request text, `start` to `end`, and markdown that reads as it alone. Providers
+ * synthesize each block on its own, so reading from any block repeats the same requests, and the
+ * environment may rewrite the markdown for speech, such as paths and code.
+ */
+export const SpeechSynthesisBlock = Schema.Struct({
+  start: NonNegativeInt,
+  end: NonNegativeInt,
+  markdown: Schema.String.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
+});
+export type SpeechSynthesisBlock = typeof SpeechSynthesisBlock.Type;
 export const SpeechSynthesisRequest = Schema.Struct({
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
   model: Schema.String.check(Schema.isMaxLength(160)),
   voice: Schema.String.check(Schema.isMaxLength(160)),
   speed: Schema.Number.check(Schema.isBetween({ minimum: 0.7, maximum: 1.5 })),
   language: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(16)),
+  blocks: Schema.optionalKey(
+    Schema.Array(SpeechSynthesisBlock).check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
+  ),
 });
 export type SpeechSynthesisRequest = typeof SpeechSynthesisRequest.Type;
 /** Single-purpose credential for `SPEECH_SYNTHESIS_AUDIO_PATH`, so media elements need no headers. */

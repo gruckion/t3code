@@ -130,121 +130,127 @@ export const warmReadAloud = createReadAloudWarmup(async (environmentId, model) 
   await runSpeech(prepareSpeechSynthesis(prepared, model));
 });
 
-export const readAloudController = createReadAloudController(async (text, settings, signal) => {
-  if (settings.provider === "system") {
-    const voices =
-      settings.voice || Platform.OS === "android" ? await Speech.getAvailableVoicesAsync() : [];
-    signal.throwIfAborted();
-    return systemPlayback(text, {
-      ...settings,
-      voice: voices.some((voice) => voice.identifier === settings.voice) ? settings.voice : "",
-    });
-  }
-  if (settings.provider === "off") throw new Error("Enable read aloud in Settings → Voice.");
-  const prepared = settings.environmentId
-    ? Option.getOrNull(
-        appAtomRegistry.get(environmentSession.preparedConnectionValueAtom(settings.environmentId)),
-      )
-    : null;
-  if (!prepared)
-    throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
-  let pendingCatalog = catalogs.get(signal);
-  if (!pendingCatalog) {
-    pendingCatalog = runSpeech(getSpeechSynthesisModels(prepared, settings.provider), signal);
-    catalogs.set(signal, pendingCatalog);
-  }
-  const catalog = await pendingCatalog;
-  signal.throwIfAborted();
-  if (catalog.error) throw new Error(catalog.error);
-  const model = settings.model || catalog.defaultModel;
-  const { url, token } = await runSpeech(
-    startSpeechSynthesis(prepared, settings.provider, {
-      text,
-      model,
-      voice: settings.voice,
-      speed: settings.speed,
-      language: settings.language,
-    }),
-    signal,
-  );
-  signal.throwIfAborted();
-  const player = createAudioPlayer(url, { updateInterval: 500 });
-  if (!speechSpeedAppliedByProvider(catalog, model)) player.setPlaybackRate(settings.speed);
-  const stopWatching = watchForeground(settings);
-  const session = createAudioPlaybackSession(
-    {
-      play() {
-        if (!pauseInBackground(settings)) player.play();
-      },
-      pause: (deactivateSession) => player.pause(deactivateSession),
-    },
-    false,
-    (requested, reason) => {
-      if (!requested) {
-        if (reason !== "pause") player.setActiveForLockScreen(false);
-        readAloudController.pause();
-      }
-    },
-    settings.backgroundPlayback,
-    // Native lock-screen Play bypasses JS, so a paused player must keep revocable ownership.
-    settings.backgroundPlayback,
-  );
-  let timed: ReturnType<typeof createTimedWords> | null = null;
-  let done: () => void = () => {};
-  const finished = new Promise<void>((resolve, reject) => {
-    done = resolve;
-    player.addListener("playbackStatusUpdate", (status) => {
-      timed?.refresh();
-      if (status.didJustFinish) resolve();
-      else if (status.error) reject(new Error("Could not play the generated speech."));
-      else if (
-        status.playing &&
-        session.requested &&
-        readAloudController.getSnapshot().status === "paused"
-      )
-        void readAloudController.resume();
-      else if (
-        session.requested &&
-        status.isLoaded &&
-        status.duration > 0 &&
-        status.currentTime < status.duration &&
-        !status.playing &&
-        !status.isBuffering &&
-        status.timeControlStatus === "paused" &&
-        readAloudController.getSnapshot().status === "playing"
-      )
-        readAloudController.pause();
-    });
-  });
-  return {
-    play: async () => {
-      if (pauseInBackground(settings)) return;
-      if (settings.backgroundPlayback)
-        player.setActiveForLockScreen(true, { title: "T3 Code", artist: "Read aloud" });
-      if (!(await session.play())) throw new Error("Finish recording before reading aloud.");
-    },
-    pause: () => session.pause(),
-    stop: () => {
-      timed?.stop();
-      stopWatching();
-      session.stop();
-      disposeAudioPlayer(player);
-      done();
-    },
-    finished,
-    words: (listener) => {
-      timed ??= createTimedWords({
-        text,
-        wordTimings: catalog.wordTimings ?? "estimated",
-        load: (after, signal) =>
-          runSpeech(getSpeechSynthesisTimings(prepared, token, after), signal),
-        clock: () => ({
-          seconds: player.currentTime,
-          rate: player.playbackRate,
-          playing: player.playing,
-        }),
+export const readAloudController = createReadAloudController(
+  async (text, settings, signal, blocks) => {
+    if (settings.provider === "system") {
+      const voices =
+        settings.voice || Platform.OS === "android" ? await Speech.getAvailableVoicesAsync() : [];
+      signal.throwIfAborted();
+      return systemPlayback(text, {
+        ...settings,
+        voice: voices.some((voice) => voice.identifier === settings.voice) ? settings.voice : "",
       });
-      return timed.subscribe(listener);
-    },
-  };
-}, m);
+    }
+    if (settings.provider === "off") throw new Error("Enable read aloud in Settings → Voice.");
+    const prepared = settings.environmentId
+      ? Option.getOrNull(
+          appAtomRegistry.get(
+            environmentSession.preparedConnectionValueAtom(settings.environmentId),
+          ),
+        )
+      : null;
+    if (!prepared)
+      throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
+    let pendingCatalog = catalogs.get(signal);
+    if (!pendingCatalog) {
+      pendingCatalog = runSpeech(getSpeechSynthesisModels(prepared, settings.provider), signal);
+      catalogs.set(signal, pendingCatalog);
+    }
+    const catalog = await pendingCatalog;
+    signal.throwIfAborted();
+    if (catalog.error) throw new Error(catalog.error);
+    const model = settings.model || catalog.defaultModel;
+    const { url, token } = await runSpeech(
+      startSpeechSynthesis(prepared, settings.provider, {
+        text,
+        model,
+        voice: settings.voice,
+        speed: settings.speed,
+        language: settings.language,
+        blocks,
+      }),
+      signal,
+    );
+    signal.throwIfAborted();
+    const player = createAudioPlayer(url, { updateInterval: 500 });
+    if (!speechSpeedAppliedByProvider(catalog, model)) player.setPlaybackRate(settings.speed);
+    const stopWatching = watchForeground(settings);
+    const session = createAudioPlaybackSession(
+      {
+        play() {
+          if (!pauseInBackground(settings)) player.play();
+        },
+        pause: (deactivateSession) => player.pause(deactivateSession),
+      },
+      false,
+      (requested, reason) => {
+        if (!requested) {
+          if (reason !== "pause") player.setActiveForLockScreen(false);
+          readAloudController.pause();
+        }
+      },
+      settings.backgroundPlayback,
+      // Native lock-screen Play bypasses JS, so a paused player must keep revocable ownership.
+      settings.backgroundPlayback,
+    );
+    let timed: ReturnType<typeof createTimedWords> | null = null;
+    let done: () => void = () => {};
+    const finished = new Promise<void>((resolve, reject) => {
+      done = resolve;
+      player.addListener("playbackStatusUpdate", (status) => {
+        timed?.refresh();
+        if (status.didJustFinish) resolve();
+        else if (status.error) reject(new Error("Could not play the generated speech."));
+        else if (
+          status.playing &&
+          session.requested &&
+          readAloudController.getSnapshot().status === "paused"
+        )
+          void readAloudController.resume();
+        else if (
+          session.requested &&
+          status.isLoaded &&
+          status.duration > 0 &&
+          status.currentTime < status.duration &&
+          !status.playing &&
+          !status.isBuffering &&
+          status.timeControlStatus === "paused" &&
+          readAloudController.getSnapshot().status === "playing"
+        )
+          readAloudController.pause();
+      });
+    });
+    return {
+      play: async () => {
+        if (pauseInBackground(settings)) return;
+        if (settings.backgroundPlayback)
+          player.setActiveForLockScreen(true, { title: "T3 Code", artist: "Read aloud" });
+        if (!(await session.play())) throw new Error("Finish recording before reading aloud.");
+      },
+      pause: () => session.pause(),
+      stop: () => {
+        timed?.stop();
+        stopWatching();
+        session.stop();
+        disposeAudioPlayer(player);
+        done();
+      },
+      finished,
+      words: (listener) => {
+        timed ??= createTimedWords({
+          text,
+          wordTimings: catalog.wordTimings ?? "estimated",
+          load: (after, signal) =>
+            runSpeech(getSpeechSynthesisTimings(prepared, token, after), signal),
+          clock: () => ({
+            seconds: player.currentTime,
+            rate: player.playbackRate,
+            playing: player.playing,
+          }),
+        });
+        return timed.subscribe(listener);
+      },
+    };
+  },
+  m,
+);

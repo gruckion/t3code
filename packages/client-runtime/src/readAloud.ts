@@ -3,6 +3,7 @@ import {
   type EnvironmentId,
   type ReadAloudSettings,
   type ReadAloudWordTimings,
+  type SpeechSynthesisBlock,
   type SpeechSynthesisTimings,
   type SpeechSynthesisWord,
 } from "@t3tools/contracts";
@@ -165,6 +166,8 @@ export function createReadAloudController(
     text: string,
     settings: ReadAloudSettings,
     signal: AbortSignal,
+    /** The blocks of `text`, so environments synthesize and cache each block alone. */
+    blocks: ReadonlyArray<SpeechSynthesisBlock>,
   ) => Promise<SpeechPlayback>,
   resolve: MFunctionType = mFallback,
 ) {
@@ -261,7 +264,15 @@ export function createReadAloudController(
     try {
       for (const chunk of chunks) {
         publish({ id, status: paused ? "paused" : "loading" });
-        const next = await prepare(chunk.text, settings, owner.signal);
+        const chunkEnd = chunk.start + chunk.text.length;
+        const blocks = speech.blocks
+          .filter((block) => block.spokenStart >= chunk.start && block.spokenEnd <= chunkEnd)
+          .map((block) => ({
+            start: block.spokenStart - chunk.start,
+            end: block.spokenEnd - chunk.start,
+            markdown: block.markdown.length <= SPEECH_SYNTHESIS_MAX_TEXT ? block.markdown : "",
+          }));
+        const next = await prepare(chunk.text, settings, owner.signal, blocks);
         if (active !== owner) {
           dispose(next);
           return;
