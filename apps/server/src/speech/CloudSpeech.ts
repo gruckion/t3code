@@ -35,6 +35,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import { encodeMp3, MAX_SYNTHESIS_BYTES } from "./synthesisAudio.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
+import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { requireSettingsSecret } from "../secrets/settingsSecretValue.ts";
 import { applySpeechAliases, speechRecognitionWords } from "./customWords.ts";
@@ -392,6 +393,7 @@ export const layer = Layer.effect(
     const resolver = yield* SecretResolver.SecretResolver;
     const http = yield* HttpClient.HttpClient;
     const cache = yield* ReadAloudCache.ReadAloudCache;
+    const speechText = yield* ReadAloudSpeechText.ReadAloudSpeechText;
     const credentials = settings.getSettings.pipe(
       Effect.map((value) => value.cloudSpeechCredentials),
     );
@@ -860,20 +862,28 @@ export const layer = Layer.effect(
               ),
             );
           });
-        return Stream.fromIterable(synthesisSegments(request)).pipe(
-          Stream.flatMap((segment) =>
-            Stream.fromIterable(
-              splitReadAloudSpans(
-                request.text.slice(segment.start, segment.end),
-                CLOUD_SYNTHESIS_TEXT_LIMIT,
-              ),
-            ).pipe(
-              Stream.flatMap((span) =>
-                piece(span.text, (start, end) => ({
-                  start: segment.start + span.start + start,
-                  end: segment.start + span.start + end,
-                })),
-              ),
+        const segments = synthesisSegments(request);
+        return Stream.fromIterable(segments.entries()).pipe(
+          Stream.flatMap(([index, segment]) =>
+            Stream.unwrap(
+              Effect.gen(function* () {
+                const next = segments[index + 1];
+                if (next) yield* speechText.prepare(next.markdown);
+                const spoken = yield* speechText.speak(
+                  segment.markdown,
+                  request.text.slice(segment.start, segment.end),
+                );
+                return Stream.fromIterable(
+                  splitReadAloudSpans(spoken.text, CLOUD_SYNTHESIS_TEXT_LIMIT),
+                ).pipe(
+                  Stream.flatMap((span) =>
+                    piece(span.text, (start, end) => {
+                      const at = spoken.place(span.start + start, span.start + end);
+                      return at && { start: segment.start + at.start, end: segment.start + at.end };
+                    }),
+                  ),
+                );
+              }),
             ),
           ),
           Stream.withSpan("CloudSpeech.stream"),

@@ -56,6 +56,7 @@ import * as LocalSpeechSynthesis from "./speech/LocalSpeechSynthesis.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
 import * as ReadAloudCache from "./speech/readAloudCache.ts";
+import * as ReadAloudSpeechText from "./speech/readAloudSpeechText.ts";
 import { speechHttpApiLayer } from "./speech/http.ts";
 import { speechStreamRouteLayer } from "./speech/stream.ts";
 import * as SpeechSynthesisStreams from "./speech/synthesisStreams.ts";
@@ -970,7 +971,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     CloudSpeech.layer.pipe(
       Layer.provide(SecretResolver.layer),
-      Layer.provide(ReadAloudCache.layer),
+      Layer.provide(ReadAloudSpeechText.layer.pipe(Layer.provideMerge(ReadAloudCache.layer))),
     ),
   ),
   Layer.provide(layerServerSettings),

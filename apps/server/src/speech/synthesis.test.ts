@@ -12,6 +12,7 @@ import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretReso
 import * as ServerSettings from "../serverSettings.ts";
 import * as CloudSpeech from "./CloudSpeech.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
+import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import { localSynthesisLanguage, localSynthesisRuntime } from "./LocalSpeechSynthesis.ts";
 import { encodeMp3, leadingSentence, pcm16Mono } from "./synthesisAudio.ts";
 
@@ -189,6 +190,7 @@ it.effect("lists ElevenLabs voices by name and sends its key only in its own hea
     }).pipe(
       Effect.provide(
         CloudSpeech.layer.pipe(
+          Layer.provide(ReadAloudSpeechText.layerPlain),
           Layer.provide(ReadAloudCache.layerDisabled),
           Layer.provide(NodeServices.layer),
           Layer.provideMerge(ServerSettings.ServerSettingsService.layerTest()),
@@ -240,6 +242,7 @@ it.effect("places ElevenLabs word timings of later pieces after the earlier piec
     }).pipe(
       Effect.provide(
         CloudSpeech.layer.pipe(
+          Layer.provide(ReadAloudSpeechText.layerPlain),
           Layer.provide(ReadAloudCache.layerDisabled),
           Layer.provide(NodeServices.layer),
           Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
@@ -520,6 +523,7 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
       yield* program.pipe(
         Effect.provide(
           CloudSpeech.layer.pipe(
+            Layer.provide(ReadAloudSpeechText.layerPlain),
             Layer.provide(ReadAloudCache.layerDisabled),
             Layer.provide(NodeServices.layer),
             Layer.provideMerge(settingsLayer),

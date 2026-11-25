@@ -14,6 +14,7 @@ import { expect, vi } from "vite-plus/test";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CloudSpeech from "./CloudSpeech.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
+import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 
 // Two MPEG-1 Layer III frames at 64 kbps and 44.1 kHz.
 const frame = Uint8Array.from({ length: 208 }, (_, index) =>
@@ -71,6 +72,7 @@ function readFrom(markdown: string, from = 0): SpeechSynthesisRequest {
 
 const withCache = (directory: string) =>
   CloudSpeech.layer.pipe(
+    Layer.provide(ReadAloudSpeechText.layerPlain),
     Layer.provide(Layer.effect(ReadAloudCache.ReadAloudCache, ReadAloudCache.make(directory))),
     Layer.provide(NodeServices.layer),
     Layer.provide(ServerSettings.ServerSettingsService.layerTest()),
