@@ -3,6 +3,7 @@ import { describe, it } from "@effect/vitest";
 import type { CloudSpeechSynthesisProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
 import { readAloudSpeech } from "@t3tools/shared/read-aloud";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -13,8 +14,11 @@ import { expect, vi } from "vite-plus/test";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as CloudSpeech from "./CloudSpeech.ts";
+import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
 import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
+import * as SpeechAligner from "./SpeechAligner.ts";
+import * as SpeechSynthesisStreams from "./synthesisStreams.ts";
 
 // Two MPEG-1 Layer III frames at 64 kbps and 44.1 kHz.
 const frame = Uint8Array.from({ length: 208 }, (_, index) =>
@@ -103,6 +107,37 @@ const read = (
     Effect.provideService(FetchHttpClient.Fetch, upstream),
   );
 
+/** The loudness levels a client reads for a request, synthesized or replayed from the cache. */
+const levels = (
+  directory: string,
+  upstream: typeof fetch,
+  request: SpeechSynthesisRequest,
+  cloud: CloudSpeechSynthesisProvider,
+) =>
+  Effect.gen(function* () {
+    yield* (yield* CloudSpeech.CloudSpeech).setKey(cloud, Redacted.make("speech-key"));
+    const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
+    const token = yield* streams.start(cloud, request);
+    let words = 0;
+    const values: number[] = [];
+    for (;;) {
+      const timings = yield* streams.timings(token, words, values.length);
+      words += timings.words.length;
+      if (timings.levels) values.push(...timings.levels.values);
+      if (timings.done) return values;
+    }
+  }).pipe(
+    Effect.provide(
+      SpeechSynthesisStreams.layer.pipe(
+        Layer.provideMerge(withCache(directory)),
+        Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)({})),
+        Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({ session: () => Effect.undefined })),
+        Layer.provide(SecureRandom.layerWebCrypto),
+      ),
+    ),
+    Effect.provideService(FetchHttpClient.Fetch, upstream),
+  );
+
 const tempDirectory = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.makeTempDirectoryScoped({ prefix: "t3-read-aloud-synthesis-" });
@@ -161,6 +196,22 @@ describe("read aloud synthesis cache", () => {
       // The same text sent to another provider is never shared.
       expect(sentTexts(upstream)).toEqual(Array.from({ length: 5 }, () => "Hello there."));
     }).pipe(Effect.scoped),
+  );
+
+  it.effect.each(["xai", "elevenlabs"] as const)(
+    "replays %s from the cache with the levels its synthesis had",
+    (cloud) =>
+      Effect.gen(function* () {
+        const directory = yield* tempDirectory;
+        const upstream = provider();
+        const request = readFrom(reply);
+        const sent = yield* levels(directory, upstream, request, cloud);
+        const cached = yield* levels(directory, upstream, request, cloud);
+        expect(upstream).toHaveBeenCalledTimes(5);
+        // xAI's cached PCM is measured again; ElevenLabs' MP3 is estimated again.
+        expect(sent.length).toBeGreaterThan(0);
+        expect(cached).toEqual(sent);
+      }).pipe(Effect.scoped),
   );
 
   it.effect("does not cache a failed request", () =>
