@@ -20,6 +20,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -30,7 +31,9 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import * as SpeechModelStore from "./SpeechModelStore.ts";
-import type { SpeechSynthesisPart } from "./CloudSpeech.ts";
+import { synthesisSegments, type SpeechSynthesisPart } from "./CloudSpeech.ts";
+import * as ReadAloudCache from "./readAloudCache.ts";
+import { mp3Duration } from "./synthesisTimings.ts";
 import { loadLocalSynthesisModel, type LocalSynthesisModel } from "./localSynthesisWorker.ts";
 import { supertonicText } from "./synthesisAudio.ts";
 
@@ -295,6 +298,7 @@ const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const store = yield* SpeechModelStore.SpeechModelStore;
   const config = yield* ServerConfig.ServerConfig;
+  const cache = yield* ReadAloudCache.ReadAloudCache;
   const scope = yield* Effect.scope;
   const platform = yield* HostProcess.Platform;
   const architecture = yield* HostProcess.Architecture;
@@ -680,11 +684,8 @@ const make = Effect.gen(function* () {
       );
   });
 
-  // Untraced: it runs inside the stream's own span.
-  const speak = Effect.fnUntraced(function* (
-    request: SpeechSynthesisRequest,
-    queue: Queue.Queue<SpeechSynthesisPart, SpeechSynthesisError | Cause.Done>,
-  ) {
+  // Checked once per request, before any block is read from the cache or synthesized.
+  const resolveSynthesis = Effect.fnUntraced(function* (request: SpeechSynthesisRequest) {
     if (!runtime || !libraryPath) return yield* failure("unavailable");
     const definition = findDefinition(request.model);
     if (!definition) return yield* failure("model-unavailable");
@@ -693,6 +694,17 @@ const make = Effect.gen(function* () {
       definition.voices.find((entry) => entry.id === request.voice) ?? definition.voices[0]!;
     const voicePath = voice.file && (yield* store.installedPath(voice.file));
     if (!paths || (voice.file && !voicePath)) return yield* failure("missing-model");
+    return { definition, paths, voice, voicePath };
+  });
+  type Synthesis = Effect.Success<ReturnType<typeof resolveSynthesis>>;
+
+  // Untraced: it runs inside the stream's own span.
+  const speak = Effect.fnUntraced(function* (
+    request: SpeechSynthesisRequest,
+    { definition, paths, voice, voicePath }: Synthesis,
+    text: string,
+    queue: Queue.Queue<SpeechSynthesisPart, SpeechSynthesisError | Cause.Done>,
+  ) {
     // Held until the stream ends, after any cancelled synthesis has stopped.
     // Interruptible, so a request abandoned while waiting stops waiting.
     yield* Effect.acquireRelease(
@@ -705,12 +717,12 @@ const make = Effect.gen(function* () {
     );
     const model = yield* ensureWorker(definition, paths);
     const language = localSynthesisLanguage(request.language, model.languages);
-    // One encoder spans the whole reply, so PCM time is MP3 time.
+    // One encoder spans the block, so PCM time is MP3 time within it.
     let spokenSeconds = 0;
     const spoken = model
       .stream(
         {
-          text: definition.speakable?.(request.text) ?? request.text,
+          text,
           ...(language ? { language } : {}),
           options: {
             ...(voicePath ? { voice_embedding_file: voicePath } : { voice_id: voice.id }),
@@ -735,9 +747,70 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // One block's audio, from the cache when it was synthesized before. A hit never loads the model.
+  const block = Effect.fnUntraced(function* (
+    request: SpeechSynthesisRequest,
+    synthesis: Synthesis,
+    plain: string,
+  ) {
+    const { definition, voice } = synthesis;
+    const text = definition.speakable?.(plain) ?? plain;
+    if (!text.trim()) return Stream.empty;
+    // Everything that changes the audio. The language is the setting, which picks the same
+    // model language every time, so the key needs no loaded model.
+    const key = yield* cache.key("audio", [
+      "local",
+      AUDIO_CPP_VERSION,
+      definition.id,
+      definition.file.sha256,
+      voice.id,
+      voice.file ? voice.file.sha256 : "",
+      definition.appliesSpeed ? String(request.speed) : "",
+      request.language,
+      text,
+    ]);
+    const cached = yield* cache.readAudio(key);
+    if (Option.isSome(cached)) return ReadAloudCache.replayAudio(cached.value);
+    return ReadAloudCache.recordAudio(
+      cache,
+      key,
+      Stream.callback<SpeechSynthesisPart, SpeechSynthesisError>((queue) =>
+        speak(request, synthesis, text, queue),
+      ),
+    );
+  });
+
+  // Each block is synthesized alone, so a replay or a jump finds its audio cached. Blocks play
+  // back to back, and a block's PCM moves to where its audio starts.
   const stream = (request: SpeechSynthesisRequest) =>
-    Stream.callback<SpeechSynthesisPart, SpeechSynthesisError>((queue) =>
-      speak(request, queue),
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const synthesis = yield* resolveSynthesis(request);
+        let elapsed = 0;
+        return Stream.fromIterable(synthesisSegments(request)).pipe(
+          Stream.flatMap((segment) =>
+            Stream.suspend(() => {
+              const offset = elapsed;
+              const duration = mp3Duration();
+              return Stream.unwrap(
+                block(request, synthesis, request.text.slice(segment.start, segment.end)),
+              ).pipe(
+                Stream.map((part): SpeechSynthesisPart => {
+                  if (part instanceof Uint8Array) duration.push(part);
+                  else if ("pcm" in part)
+                    return { ...part, startSeconds: part.startSeconds + offset };
+                  return part;
+                }),
+                Stream.onEnd(
+                  Effect.sync(() => {
+                    elapsed = offset + duration.seconds;
+                  }),
+                ),
+              );
+            }),
+          ),
+        );
+      }),
     ).pipe(
       Stream.tapError((error) =>
         error.reason === "unavailable"

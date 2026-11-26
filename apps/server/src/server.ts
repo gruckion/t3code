@@ -973,7 +973,7 @@ const layerMakeRoutes = Layer.mergeAll(
       SpeechService.layer.pipe(Layer.provide(layerServerSettings)),
       LocalSpeechSynthesis.layer,
       SpeechAligner.layer,
-    ).pipe(Layer.provide(SpeechModelStore.layer)),
+    ).pipe(Layer.provide(SpeechModelStore.layer), Layer.provide(ReadAloudCache.layer)),
   ),
   Layer.provide(OpenRouterSignIn.layer),
   Layer.provide(

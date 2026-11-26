@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
+import { describe, it } from "@effect/vitest";
+import type { SpeechSynthesisRequest } from "@t3tools/contracts";
 import { AUDIO_CPP_ESPEAK_DATA, AUDIO_CPP_VERSION, audioCppRuntime } from "@t3tools/audio-cpp";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -9,10 +10,41 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 import { expect, vi } from "vite-plus/test";
 import * as ServerConfig from "../config.ts";
 import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
+import type { LocalSynthesisModel } from "./localSynthesisWorker.ts";
+import * as ReadAloudCache from "./readAloudCache.ts";
 import * as SpeechModelStore from "./SpeechModelStore.ts";
+
+// Two MPEG-1 Layer III frames at 64 kbps and 44.1 kHz.
+const frame = Uint8Array.from({ length: 208 }, (_, index) =>
+  index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : 0,
+);
+
+/** A model that speaks each text as two MP3 frames and a tenth of a second of PCM. */
+const worker = vi.hoisted(() => {
+  const spoken: Array<string> = [];
+  const model: LocalSynthesisModel = {
+    backend: "cpu",
+    languages: ["en"],
+    alive: true,
+    stream: async (request, onAudio, onPcm) => {
+      spoken.push(request.text);
+      onPcm?.(
+        Int16Array.from({ length: 2_400 }, (_, index) => index),
+        24_000,
+      );
+      onAudio(frame);
+      onAudio(frame);
+    },
+    cancel: () => {},
+    dispose: async () => {},
+  };
+  return { spoken, load: vi.fn(async () => model) };
+});
+vi.mock("./localSynthesisWorker.ts", () => ({ loadLocalSynthesisModel: worker.load }));
 
 /** Runs `body` against the service, with an extracted runtime unless `runtime` is false. */
 const withService = <A, E>(
@@ -20,7 +52,10 @@ const withService = <A, E>(
   body: (
     service: LocalSpeechSynthesis.LocalSpeechSynthesis["Service"],
   ) => Effect.Effect<A, E, never>,
-  options: { readonly runtime?: boolean } = {},
+  options: {
+    readonly runtime?: boolean;
+    readonly cache?: Layer.Layer<ReadAloudCache.ReadAloudCache>;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
@@ -48,6 +83,7 @@ const withService = <A, E>(
             ...store,
           }),
         ),
+        Layer.provide(options.cache ?? ReadAloudCache.layerDisabled),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-local-speech-" })),
         Layer.provide(SecureRandom.layerWebCrypto),
         Layer.provideMerge(NodeServices.layer),
@@ -187,3 +223,92 @@ it.effect("refuses a download or link while a removal deletes the shared runtime
     );
   }),
 );
+
+describe("read aloud cache for local models", () => {
+  const text = "First block.\n\nSecond block.\n\nThird block.";
+  const request = (from = 0): SpeechSynthesisRequest => {
+    const blocks = text.split("\n\n");
+    const start = text.indexOf(blocks[from]!);
+    return {
+      text: text.slice(start),
+      model: "kokoro-82m",
+      voice: "af_heart",
+      speed: 1,
+      language: "en-US",
+      blocks: blocks.slice(from).map((block) => ({
+        start: text.indexOf(block) - start,
+        end: text.indexOf(block) - start + block.length,
+        markdown: block,
+      })),
+    };
+  };
+  const installed = { installedPath: () => Effect.succeed("/models/installed") };
+
+  /** Plays `input` through a fresh service on `directory`, as after a server restart. */
+  const play = (directory: string, input: SpeechSynthesisRequest) =>
+    withService(
+      installed,
+      (service) =>
+        service.stream(input).pipe(
+          Stream.runCollect,
+          Effect.map((parts) => ({
+            audio: parts.filter((part) => part instanceof Uint8Array),
+            pcm: parts.flatMap((part) => ("pcm" in part ? [part] : [])),
+          })),
+        ),
+      {
+        cache: Layer.effect(ReadAloudCache.ReadAloudCache, ReadAloudCache.make(directory)).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
+      },
+    );
+
+  const tempDirectory = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.makeTempDirectoryScoped({ prefix: "t3-read-aloud-local-" });
+  });
+
+  it.effect("synthesizes each block once, and replays its audio and PCM without the model", () =>
+    Effect.gen(function* () {
+      worker.load.mockClear();
+      worker.spoken.length = 0;
+      const directory = yield* tempDirectory;
+      const fs = yield* FileSystem.FileSystem;
+
+      const first = yield* play(directory, request());
+      expect(worker.spoken).toEqual(["First block.", "Second block.", "Third block."]);
+      expect(worker.load).toHaveBeenCalledTimes(1);
+      // An MP3, a PCM, and a JSON file for each block.
+      expect((yield* fs.readDirectory(directory)).length).toBe(9);
+      // Each block's PCM starts where its audio does, so the aligner times it in place.
+      expect(first.pcm.map((part) => part.startSeconds)).toEqual([
+        0,
+        (2 * 1152) / 44_100,
+        (4 * 1152) / 44_100,
+      ]);
+
+      const replay = yield* play(directory, request());
+      expect(worker.load).toHaveBeenCalledTimes(1);
+      expect(worker.spoken).toHaveLength(3);
+      expect(Buffer.concat(replay.audio)).toEqual(Buffer.concat(first.audio));
+      expect(replay.pcm).toEqual(first.pcm);
+
+      // Reading from a clicked block finds the blocks it reads cached too.
+      const jump = yield* play(directory, request(1));
+      expect(worker.load).toHaveBeenCalledTimes(1);
+      expect(jump.pcm.map((part) => part.startSeconds)).toEqual([0, (2 * 1152) / 44_100]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keys audio on the voice and on the speed the model applies", () =>
+    Effect.gen(function* () {
+      worker.spoken.length = 0;
+      const directory = yield* tempDirectory;
+      yield* play(directory, request(2));
+      yield* play(directory, { ...request(2), voice: "am_adam" });
+      yield* play(directory, { ...request(2), speed: 1.3 });
+      yield* play(directory, { ...request(2), speed: 1.3 });
+      expect(worker.spoken).toEqual(["Third block.", "Third block.", "Third block."]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
