@@ -1,10 +1,11 @@
-import { m } from "../../i18n/messages";
+import { getActiveLocale, m } from "../../i18n/messages";
 import {
   createReadAloudController,
   createReadAloudWarmup,
   createTimedWords,
   type SpeechPlayback,
   type SpokenWord,
+  readAloudWordAlignment,
 } from "@t3tools/client-runtime/read-aloud";
 import {
   getSpeechSynthesisModels,
@@ -26,6 +27,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
 import { createAudioPlaybackSession, disposeAudioPlayer } from "../../lib/audioSession";
 import { runSpeech } from "../voice-input/voiceDestination";
+import { throttleAudioLevels } from "./readAloudLevel";
 
 function pauseInBackground(settings: ReadAloudSettings) {
   const shouldPause = !settings.backgroundPlayback && AppState.currentState !== "active";
@@ -148,9 +150,13 @@ export const readAloudController = createReadAloudController(async (text, settin
     : null;
   if (!prepared)
     throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
+  const alignment = readAloudWordAlignment(settings, getActiveLocale());
   let pendingCatalog = catalogs.get(signal);
   if (!pendingCatalog) {
-    pendingCatalog = runSpeech(getSpeechSynthesisModels(prepared, settings.provider), signal);
+    pendingCatalog = runSpeech(
+      getSpeechSynthesisModels(prepared, settings.provider, alignment),
+      signal,
+    );
     catalogs.set(signal, pendingCatalog);
   }
   const catalog = await pendingCatalog;
@@ -164,12 +170,14 @@ export const readAloudController = createReadAloudController(async (text, settin
       voice: settings.voice,
       speed: settings.speed,
       language: settings.language,
+      alignment,
     }),
     signal,
   );
   signal.throwIfAborted();
   const player = createAudioPlayer(url, { updateInterval: 500 });
-  if (!speechSpeedAppliedByProvider(catalog, model)) player.setPlaybackRate(settings.speed);
+  const speedApplied = speechSpeedAppliedByProvider(catalog, model);
+  if (!speedApplied) player.setPlaybackRate(settings.speed);
   const stopWatching = watchForeground(settings);
   const session = createAudioPlaybackSession(
     {
@@ -190,6 +198,18 @@ export const readAloudController = createReadAloudController(async (text, settin
     settings.backgroundPlayback,
   );
   let timed: ReturnType<typeof createTimedWords> | null = null;
+  const levelListeners = new Set<(level: number) => void>();
+  let sampling: { remove: () => void } | null = null;
+  const reportLevel = (level: number) => {
+    for (const listener of levelListeners) listener(level);
+  };
+  const stopSampling = () => {
+    if (!sampling) return;
+    sampling.remove();
+    sampling = null;
+    player.setAudioSamplingEnabled(false);
+    reportLevel(0);
+  };
   let done: () => void = () => {};
   const finished = new Promise<void>((resolve, reject) => {
     done = resolve;
@@ -223,9 +243,14 @@ export const readAloudController = createReadAloudController(async (text, settin
         player.setActiveForLockScreen(true, { title: "T3 Code", artist: "Read aloud" });
       if (!(await session.play())) throw new Error("Finish recording before reading aloud.");
     },
-    pause: () => session.pause(),
+    pause: () => {
+      session.pause();
+      reportLevel(0);
+    },
     stop: () => {
       timed?.stop();
+      stopSampling();
+      levelListeners.clear();
       stopWatching();
       session.stop();
       disposeAudioPlayer(player);
@@ -235,7 +260,6 @@ export const readAloudController = createReadAloudController(async (text, settin
     words: (listener) => {
       timed ??= createTimedWords({
         text,
-        wordTimings: catalog.wordTimings ?? "estimated",
         load: (after, signal) =>
           runSpeech(getSpeechSynthesisTimings(prepared, token, after), signal),
         clock: () => ({
@@ -245,6 +269,32 @@ export const readAloudController = createReadAloudController(async (text, settin
         }),
       });
       return timed.subscribe(listener);
+    },
+    seek: (at) => {
+      const seconds = timed?.secondsAt(at);
+      // The synthesis stream has no byte ranges, so its length stays unknown (0) and a seek can
+      // land anywhere; seek only once the player knows the length, and otherwise read again.
+      if (seconds === undefined || !player.isLoaded || seconds >= player.duration) return false;
+      void player.seekTo(seconds).then(
+        () => timed?.refresh(),
+        () => {},
+      );
+      return true;
+    },
+    // Audio a provider made at `settings.speed` plays at 1 for that speed.
+    setSpeed: (speed) => player.setPlaybackRate(speedApplied ? speed / settings.speed : speed),
+    levels: (listener) => {
+      if (!player.isAudioSamplingSupported) return () => {};
+      levelListeners.add(listener);
+      if (!sampling) {
+        // Android samples only with the microphone permission; without it the meter stays still.
+        player.setAudioSamplingEnabled(true);
+        sampling = player.addListener("audioSampleUpdate", throttleAudioLevels(reportLevel));
+      }
+      return () => {
+        levelListeners.delete(listener);
+        if (levelListeners.size === 0) stopSampling();
+      };
     },
   };
 }, m);

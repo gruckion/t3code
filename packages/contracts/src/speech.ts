@@ -31,6 +31,47 @@ export const CloudSpeechKeys = Schema.Struct({
 });
 export type CloudSpeechKeys = typeof CloudSpeechKeys.Type;
 
+/**
+ * Starts signing in with OpenRouter, which creates a key for this environment. With a callback
+ * URL, OpenRouter returns there; without one, it shows a code to paste instead.
+ */
+export const OpenRouterSignInRequest = Schema.Struct({
+  callbackUrl: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2048))),
+});
+export const OpenRouterSignIn = Schema.Struct({
+  authorizationUrl: Schema.String,
+  state: Schema.String,
+});
+export type OpenRouterSignIn = typeof OpenRouterSignIn.Type;
+export const OpenRouterSignInCode = Schema.Struct({
+  state: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  code: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+});
+export const OpenRouterSignInStatusRequest = Schema.Struct({
+  state: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+});
+/** Where a started sign-in stands: still open, done, refused by OpenRouter, or gone. */
+export const OpenRouterSignInStatus = Schema.Struct({
+  status: Schema.Literals(["pending", "signed-in", "rejected", "unavailable", "expired"]),
+});
+export type OpenRouterSignInStatus = typeof OpenRouterSignInStatus.Type;
+export class OpenRouterSignInError extends Schema.TaggedError<OpenRouterSignInError>()(
+  "OpenRouterSignInError",
+  { reason: Schema.Literals(["expired", "rejected", "unavailable"]) },
+  { httpApiStatus: 422 },
+) {
+  override get message() {
+    switch (this.reason) {
+      case "expired":
+        return "This OpenRouter sign-in expired. Sign in again.";
+      case "rejected":
+        return "OpenRouter didn’t accept this sign-in. Sign in again.";
+      case "unavailable":
+        return "Couldn’t reach OpenRouter. Try again.";
+    }
+  }
+}
+
 /** An exact `author/model` slug. Router shortcuts such as `:nitro` or `openrouter/auto` are not models. */
 export const CloudSpeechModelId = Schema.String.check(
   Schema.isMinLength(3),
@@ -38,6 +79,8 @@ export const CloudSpeechModelId = Schema.String.check(
   Schema.isPattern(/^(?!openrouter\/)[a-z\d][a-z\d.-]*\/[a-z\d][a-z\d._-]*$/i),
 );
 export type CloudSpeechModelId = typeof CloudSpeechModelId.Type;
+/** The OpenRouter model dictation starts with; it is changed in voice settings afterwards. */
+export const DEFAULT_OPENROUTER_TRANSCRIPTION_MODEL = "openai/whisper-large-v3-turbo";
 export const CloudSpeechModel = Schema.Struct({ id: CloudSpeechModelId, name: Schema.String });
 export type CloudSpeechModel = typeof CloudSpeechModel.Type;
 export const CloudSpeechModels = Schema.Struct({ models: Schema.Array(CloudSpeechModel) });

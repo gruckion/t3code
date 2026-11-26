@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { expect } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { SpeechSynthesisError, type SpeechSynthesisRequest } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -13,6 +13,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as CloudSpeech from "./CloudSpeech.ts";
 import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
+import * as SpeechAligner from "./SpeechAligner.ts";
 import * as SpeechSynthesisStreams from "./synthesisStreams.ts";
 
 const request: SpeechSynthesisRequest = {
@@ -23,10 +24,14 @@ const request: SpeechSynthesisRequest = {
   language: "en",
 };
 
-const withSource = (source: Stream.Stream<CloudSpeech.SpeechSynthesisPart, SpeechSynthesisError>) =>
+const withSource = (
+  source: Stream.Stream<CloudSpeech.SpeechSynthesisPart, SpeechSynthesisError>,
+  aligner: Partial<SpeechAligner.SpeechAligner["Service"]> = {},
+) =>
   SpeechSynthesisStreams.layer.pipe(
     Layer.provide(Layer.mock(CloudSpeech.CloudSpeech)({ stream: () => source })),
     Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)({})),
+    Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)(aligner)),
     Layer.provide(SecureRandom.layerWebCrypto),
   );
 
@@ -41,7 +46,7 @@ it.effect("hands every reader the audio from its start while synthesis continues
     yield* Effect.gen(function* () {
       const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
       yield* Queue.offer(source, Uint8Array.of(1));
-      const token = yield* streams.start("openai", request);
+      const token = yield* streams.start("xai", request);
       const live = yield* Effect.forkChild(audio(yield* streams.read(token)));
       yield* Queue.offer(source, Uint8Array.of(2));
       yield* Queue.end(source);
@@ -82,17 +87,64 @@ it.effect("answers word timings as they arrive and the audio length once synthes
   }),
 );
 
+it.effect("times PCM-only audio with the aligner and ends timings once it has finished", () =>
+  Effect.gen(function* () {
+    const source = yield* Queue.unbounded<
+      CloudSpeech.SpeechSynthesisPart,
+      SpeechSynthesisError | Cause.Done
+    >();
+    const frame = Uint8Array.from({ length: 208 }, (_, index) =>
+      index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : 0,
+    );
+    const word = (start: number) => ({ start, end: start + 4, startSeconds: start, endSeconds: 1 });
+    const finishing = yield* Deferred.make<void>();
+    const pushed: Array<{ readonly rate: number; readonly startSeconds: number }> = [];
+    const session = vi.fn(() =>
+      Effect.succeed({
+        push: (_pcm: Int16Array, rate: number, startSeconds: number) =>
+          Effect.sync(() => {
+            pushed.push({ rate, startSeconds });
+            return [word(0)];
+          }),
+        finish: () => Deferred.await(finishing).pipe(Effect.as([word(5)])),
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
+      yield* Queue.offerAll(source, [
+        { pcm: new Int16Array(4), rate: 24_000, startSeconds: 0.5 },
+        frame,
+      ]);
+      const token = yield* streams.start("xai", { ...request, alignment: "multilingual" });
+      expect(yield* streams.timings(token, 0)).toEqual({ words: [word(0)], done: false });
+      expect(session).toHaveBeenCalledWith(request.text, "en", "multilingual");
+      expect(pushed).toEqual([{ rate: 24_000, startSeconds: 0.5 }]);
+      yield* Queue.end(source);
+      // Synthesis has ended, but the last words are still being timed.
+      const waiting = yield* Effect.forkChild(streams.timings(token, 1));
+      yield* Deferred.succeed(finishing, undefined);
+      expect(yield* Fiber.join(waiting)).toEqual({ words: [word(5)], done: false });
+      expect(yield* streams.timings(token, 2)).toEqual({
+        words: [],
+        done: true,
+        durationSeconds: 1152 / 44100,
+      });
+      expect(yield* audio(yield* streams.read(token))).toEqual([...frame]);
+    }).pipe(Effect.provide(withSource(Stream.fromQueue(source), { session })));
+  }),
+);
+
 it.effect.each([
   [
     "a provider error",
-    Stream.fail(new SpeechSynthesisError({ provider: "openai", reason: "rate-limit" })),
+    Stream.fail(new SpeechSynthesisError({ provider: "xai", reason: "rate-limit" })),
     "rate-limit",
   ],
   ["no audio", Stream.empty, "unavailable"],
 ] as const)("fails to start on %s before any audio", ([, source, reason]) =>
   Effect.gen(function* () {
     const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
-    expect(yield* Effect.flip(streams.start("openai", request))).toMatchObject({ reason });
+    expect(yield* Effect.flip(streams.start("xai", request))).toMatchObject({ reason });
   }).pipe(Effect.provide(withSource(source))),
 );
 
@@ -102,10 +154,10 @@ it.effect("fails readers when synthesis breaks off after the first audio", () =>
     yield* Effect.gen(function* () {
       const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
       yield* Queue.offer(source, Uint8Array.of(1));
-      const token = yield* streams.start("openai", request);
+      const token = yield* streams.start("xai", request);
       yield* Queue.fail(
         source,
-        new SpeechSynthesisError({ provider: "openai", reason: "unavailable" }),
+        new SpeechSynthesisError({ provider: "xai", reason: "unavailable" }),
       );
       expect(Exit.isFailure(yield* Effect.exit(audio(yield* streams.read(token))))).toBe(true);
     }).pipe(Effect.provide(withSource(Stream.fromQueue(source))));
@@ -122,7 +174,7 @@ it.effect.each([
     yield* Effect.gen(function* () {
       const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
       yield* Queue.offer(source, Uint8Array.of(1));
-      const token = yield* streams.start("openai", request);
+      const token = yield* streams.start("xai", request);
       if (read)
         expect(yield* audio((yield* streams.read(token))?.pipe(Stream.take(1)))).toEqual([1]);
       yield* TestClock.adjust(grace);

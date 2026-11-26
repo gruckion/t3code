@@ -28,12 +28,59 @@ export function mp3Kbps(sampleRate: number) {
   return sampleRate > 32000 ? 64 : 48;
 }
 /**
- * Splits off a short opening sentence (read-aloud text has one per line), so its audio arrives
- * before the model reaches the rest. Self-contained so the synthesis worker can inline it.
+ * The lines of read-aloud text, one sentence or block each, spoken one at a time as Kokoro's
+ * reference pipeline splits them, so the first arrives before the model reaches the rest.
+ * Self-contained so the synthesis worker can inline it.
  */
-export function leadingSentence(text: string) {
-  const end = text.indexOf("\n");
-  return end < 0 || end > 160 ? [text] : [text.slice(0, end), text.slice(end + 1)];
+export function speechLines(text: string) {
+  return text.split(/\n+/).filter((line) => line.trim());
+}
+
+/**
+ * Halves `text` at its last sentence end before the middle, else clause, else comma, for a model
+ * that refused it as too long: the waterfall Kokoro's reference pipeline uses to stay under 510
+ * phonemes. Undefined when there is no such break. Self-contained so the worker can inline it.
+ */
+export function splitAtPunctuation(text: string) {
+  const middle = Math.floor(text.length / 2);
+  for (const marks of [/[!.?…]\s/g, /[:;]\s/g, /[,—]\s/g, /\s/g]) {
+    const breaks = [...text.matchAll(marks)].map((match) => match.index + match[0].length);
+    const at = breaks.filter((index) => index <= middle).at(-1) ?? breaks[0];
+    if (at !== undefined && at > 0 && at < text.length) return [text.slice(0, at), text.slice(at)];
+  }
+  return undefined;
+}
+
+// Supertonic's reference text preprocessing (supertone-inc/supertonic `py/helper.py`): its
+// indexer has no entry for emoji and some symbols, and rejects the whole text over one.
+const SUPERTONIC_EMOJI =
+  /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}]|\u{FE0F}|\u{200D}/gu;
+const SUPERTONIC_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/[–‑—]/g, "-"],
+  [/_/g, " "],
+  [/[“”]/g, '"'],
+  [/[‘’´`]/g, "'"],
+  [/[[\]|/#→←]/g, " "],
+  [/[♥☆♡©\\]/g, ""],
+  [/@/g, " at "],
+  [/\be\.g\.,/g, "for example,"],
+  [/\bi\.e\.,/g, "that is,"],
+];
+
+/** Text Supertonic can speak, cleaned the way its reference implementation cleans it. */
+export function supertonicText(text: string) {
+  let cleaned = text.normalize("NFKD").replace(SUPERTONIC_EMOJI, "");
+  for (const [pattern, replacement] of SUPERTONIC_REPLACEMENTS)
+    cleaned = cleaned.replace(pattern, replacement);
+  return cleaned
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/\s+([,.!?;:'])/g, "$1")
+        .replace(/[ \t]+/g, " ")
+        .trim(),
+    )
+    .join("\n");
 }
 const MP3_SAMPLE_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
 // About half a second at 44.1 kHz, which encodes in about 15 ms.
@@ -55,25 +102,64 @@ export function pcm16Mono(samples: Float32Array, channels: number) {
   return pcm;
 }
 
+/** Whether `encodeMp3` takes this little-endian 16-bit PCM. */
+function isEncodablePcm(pcm: Uint8Array, rate: number, channels: number) {
+  return (
+    MP3_SAMPLE_RATES.includes(rate) &&
+    (channels === 1 || channels === 2) &&
+    pcm.length > 0 &&
+    pcm.length % (channels * 2) === 0 &&
+    pcm.length <= MAX_SYNTHESIS_BYTES
+  );
+}
+
+/** Whether MP3 can carry PCM at this rate and channel count unchanged. */
+export function isEncodableFormat(rate: number, channels: number) {
+  return MP3_SAMPLE_RATES.includes(rate) && (channels === 1 || channels === 2);
+}
+
+/**
+ * Encodes little-endian 16-bit PCM to MP3 as it arrives, so audio plays before the provider
+ * finishes. Network chunks can split a sample or frame; the remainder waits for the next one.
+ */
+export async function streamingMp3Encoder(rate: number, channels: number) {
+  const { Mp3Encoder } = await loadLamejs();
+  const encoder = new Mp3Encoder(1, rate, mp3Kbps(rate));
+  const frame = channels * 2;
+  let pending = new Uint8Array(0);
+  return {
+    /** The mono samples of whole frames received so far, and their MP3. */
+    push: (bytes: Uint8Array) => {
+      const joined = pending.length ? concat([pending, bytes]) : bytes;
+      const whole = joined.length - (joined.length % frame);
+      pending = joined.slice(whole);
+      const pcm = monoPcm16(joined.subarray(0, whole), channels);
+      const parts: Uint8Array[] = [];
+      for (let start = 0; start < pcm.length; start += ENCODE_SLICE_SAMPLES)
+        parts.push(encoder.encodeBuffer(pcm.subarray(start, start + ENCODE_SLICE_SAMPLES)));
+      return { pcm, mp3: concat(parts) };
+    },
+    flush: () => concat([encoder.flush()]),
+  };
+}
+
+/** Little-endian 16-bit PCM bytes as mono samples. */
+function monoPcm16(pcm: Uint8Array, channels: number) {
+  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const samples = new Float32Array(Math.floor(pcm.length / 2));
+  for (let index = 0; index < samples.length; index++)
+    samples[index] = view.getInt16(index * 2, true) / 0x8000;
+  return pcm16Mono(samples, channels);
+}
+
 /** Encodes little-endian 16-bit PCM to MP3 in slices, so a long clip never holds the event loop. */
 export function encodeMp3(
   pcm: Uint8Array,
   rate: number,
   channels = 1,
 ): Stream.Stream<Uint8Array, Error> {
-  if (
-    !MP3_SAMPLE_RATES.includes(rate) ||
-    (channels !== 1 && channels !== 2) ||
-    !pcm.length ||
-    pcm.length % (channels * 2) ||
-    pcm.length > MAX_SYNTHESIS_BYTES
-  )
-    return Stream.fail(new Error("Invalid speech audio."));
-  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-  const samples = new Float32Array(pcm.length / 2);
-  for (let index = 0; index < samples.length; index++)
-    samples[index] = view.getInt16(index * 2, true) / 0x8000;
-  const mono = pcm16Mono(samples, channels);
+  if (!isEncodablePcm(pcm, rate, channels)) return Stream.fail(new Error("Invalid speech audio."));
+  const mono = monoPcm16(pcm, channels);
   const slices = Math.ceil(mono.length / ENCODE_SLICE_SAMPLES);
   // A missing encoder package is a packaging defect, not a recoverable failure.
   return Effect.promise(loadLamejs).pipe(

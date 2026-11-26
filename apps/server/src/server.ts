@@ -1,4 +1,5 @@
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as DatabaseMigrationProgress from "./persistence/DatabaseMigrationProgress.ts";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Random from "effect/Random";
 import * as EnvironmentKeys from "./cloud/environmentKeys.ts";
@@ -26,6 +27,7 @@ import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
@@ -53,9 +55,11 @@ import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
 import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
 import * as LocalSpeechSynthesis from "./speech/LocalSpeechSynthesis.ts";
+import * as SpeechAligner from "./speech/SpeechAligner.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
 import { speechHttpApiLayer } from "./speech/http.ts";
+import * as OpenRouterSignIn from "./speech/OpenRouterSignIn.ts";
 import { speechStreamRouteLayer } from "./speech/stream.ts";
 import * as SpeechSynthesisStreams from "./speech/synthesisStreams.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
@@ -380,6 +384,7 @@ const layerSpawner = SpawnWorker.layerServer.pipe(Layer.provide(NodeServices.lay
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    const migrationProgress = yield* DatabaseMigrationProgress.DatabaseMigrationProgress;
     // Before binding: a host the policy does not allow must never listen, not even briefly.
     const policy = yield* ManagedPolicy.ManagedPolicy;
     const bindHost = yield* ManagedLimits.checkServerReachability(policy, {
@@ -394,6 +399,7 @@ const layerHttpServer = Layer.unwrap(
       () => {
         const server = rejectRequestsUntilServing(
           keepIdleConnections(guardHttpResponseWriteErrors(NodeHttp.createServer())),
+          () => Ref.getUnsafe(migrationProgress.current),
         );
         if (config.privateNetworkOnly) {
           runSync(closeNonPrivateNetworkConnections(server));
@@ -961,11 +967,13 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   Layer.provide(SpeechSynthesisStreams.layer),
   Layer.provide(
-    Layer.merge(
+    Layer.mergeAll(
       SpeechService.layer.pipe(Layer.provide(layerServerSettings)),
       LocalSpeechSynthesis.layer,
+      SpeechAligner.layer,
     ).pipe(Layer.provide(SpeechModelStore.layer)),
   ),
+  Layer.provide(OpenRouterSignIn.layer),
   Layer.provide(CloudSpeech.layer.pipe(Layer.provide(SecretResolver.layer))),
   Layer.provide(layerServerSettings),
   Layer.provide(PreviewAutomationBroker.layer),
@@ -1435,6 +1443,7 @@ const layerMakeServer = Layer.unwrap(
         RelayTracing.layerServerRelayBroker.pipe(Layer.provide(ManagedPolicy.layer)),
       ),
       Layer.provideMerge(layerHttpServer),
+      Layer.provide(DatabaseMigrationProgress.layer),
       Layer.provide(layerApplicationObservability),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(VcsProcess.layer),

@@ -3,15 +3,19 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { EnvironmentId, NonNegativeInt } from "./baseSchemas.ts";
 import { CloudSpeechProvider } from "./speech.ts";
-
+/** Hosted read-aloud APIs. OpenAI is left out: its speech models shut down on 6 January 2027. */
+export const CloudSpeechSynthesisProvider = Schema.Literals(["xai", "openrouter", "elevenlabs"]);
+export type CloudSpeechSynthesisProvider = typeof CloudSpeechSynthesisProvider.Type;
 /** `local` runs a downloaded model on the selected environment; the rest are hosted APIs. */
-export const SpeechSynthesisProvider = Schema.Union([CloudSpeechProvider, Schema.Literal("local")]);
+export const SpeechSynthesisProvider = Schema.Union([
+  CloudSpeechSynthesisProvider,
+  Schema.Literal("local"),
+]);
 export type SpeechSynthesisProvider = typeof SpeechSynthesisProvider.Type;
 export const READ_ALOUD_LABELS = {
   off: "Off",
   system: "System voices",
   local: "Local model",
-  openai: "OpenAI",
   xai: "Grok TTS",
   openrouter: "OpenRouter",
   elevenlabs: "ElevenLabs",
@@ -29,9 +33,9 @@ export const ReadAloudSettings = Schema.Struct({
     "elevenlabs",
   ]).pipe(
     Schema.decodeTo(
-      Schema.Literals(["off", "system", "local", "openai", "xai", "openrouter", "elevenlabs"]),
+      Schema.Literals(["off", "system", "local", "xai", "openrouter", "elevenlabs"]),
       SchemaTransformation.transform({
-        decode: (value) => (value === "chatgpt" ? ("off" as const) : value),
+        decode: (value) => (value === "chatgpt" || value === "openai" ? ("off" as const) : value),
         encode: (value) => value,
       }),
     ),
@@ -43,6 +47,8 @@ export const ReadAloudSettings = Schema.Struct({
   language: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(16)),
   skipCodeBlocks: Schema.Boolean,
   backgroundPlayback: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** English-locale users can trade the 135 MB English timing model for the multilingual one. */
+  multilingualWordTiming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ReadAloudSettings = typeof ReadAloudSettings.Type;
 export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
@@ -54,6 +60,7 @@ export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
   language: "auto",
   skipCodeBlocks: true,
   backgroundPlayback: true,
+  multilingualWordTiming: false,
 };
 export const ReadAloudPreference = ReadAloudSettings.pipe(
   Schema.withDecodingDefault(Effect.succeed(DEFAULT_READ_ALOUD_SETTINGS)),
@@ -62,12 +69,20 @@ export const ReadAloudPreference = ReadAloudSettings.pipe(
 export const SPEECH_SYNTHESIS_MAX_TEXT = 32_000;
 /** Serves a started synthesis as one MP3 stream that native players read while it is produced. */
 export const SPEECH_SYNTHESIS_AUDIO_PATH = "/api/voice/synthesis/audio";
+/** Which speech recognition model times the words of providers that report none. */
+export const SpeechWordAlignment = Schema.Literals(["english", "multilingual"]);
+export type SpeechWordAlignment = typeof SpeechWordAlignment.Type;
 export const SpeechSynthesisRequest = Schema.Struct({
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
   model: Schema.String.check(Schema.isMaxLength(160)),
   voice: Schema.String.check(Schema.isMaxLength(160)),
   speed: Schema.Number.check(Schema.isBetween({ minimum: 0.7, maximum: 1.5 })),
   language: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(16)),
+  alignment: Schema.optionalKey(SpeechWordAlignment),
+});
+export const SpeechSynthesisCatalogQuery = Schema.Struct({
+  /** Fetches that timing model in the background when the provider reports no word timings. */
+  alignment: Schema.optionalKey(SpeechWordAlignment),
 });
 export type SpeechSynthesisRequest = typeof SpeechSynthesisRequest.Type;
 /** Single-purpose credential for `SPEECH_SYNTHESIS_AUDIO_PATH`, so media elements need no headers. */

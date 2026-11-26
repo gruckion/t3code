@@ -11,7 +11,7 @@ import {
   CLOUD_SPEECH_PROVIDER_NAMES,
   READ_ALOUD_LABELS,
   isSecretReference,
-  type CloudSpeechProvider,
+  type CloudSpeechSynthesisProvider,
   type SecretProviderId,
   type SettingsSecretValue,
 } from "@t3tools/contracts";
@@ -36,6 +36,7 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { useCloudRead } from "./CloudVoiceConfiguration";
+import { OpenRouterSignIn } from "./OpenRouterSignIn";
 import { SecretInput } from "./SecretInput";
 import { SecretSourceSelect } from "./SecretSourceInput";
 
@@ -50,7 +51,7 @@ export function ReadAloudKeyDialog({
   close,
 }: {
   environment: Pick<EnvironmentPresentation, "environmentId" | "label" | "serverConfig">;
-  provider: CloudSpeechProvider;
+  provider: CloudSpeechSynthesisProvider;
   /** Read-aloud already uses this provider here, so the dialog only manages its key. */
   active: boolean;
   onEnable: () => void;
@@ -124,15 +125,23 @@ export function ReadAloudKeyDialog({
                 : gt("Read replies aloud with {name}?", { name })}
           </DialogTitle>
           <DialogDescription>
-            {remove
-              ? gt(
-                  "Everyone using {company} for dictation or read aloud on {environment} will lose access.",
-                  { company, environment: environment.label },
-                )
-              : gt(
-                  "Replies you play are sent to {company} through {environment}, which bills its API key. The key is shared with dictation.",
-                  { company, environment: environment.label },
-                )}
+            {remove ? (
+              <T>
+                Everyone using <Var>{company}</Var> for dictation or read aloud on{" "}
+                <strong className="font-medium text-foreground">
+                  <Var>{environment.label}</Var>
+                </strong>{" "}
+                will lose access.
+              </T>
+            ) : (
+              <T>
+                Replies you play are sent to <Var>{company}</Var> through{" "}
+                <strong className="font-medium text-foreground">
+                  <Var>{environment.label}</Var>
+                </strong>
+                , which bills its API key. The key is shared with dictation.
+              </T>
+            )}
           </DialogDescription>
         </DialogHeader>
         {!remove && (
@@ -152,71 +161,87 @@ export function ReadAloudKeyDialog({
                 <T>Checking for an API key…</T>
               </p>
             ) : editingKey ? (
-              <form
-                id={formId}
-                className="grid gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (credential !== undefined) void saveKey(credential, !active);
-                }}
-              >
-                <Label htmlFor="read-aloud-cloud-key">
-                  <T>API key</T>
-                </Label>
-                <div className="flex min-w-0 items-start gap-2">
-                  {sources.length > 0 && (
-                    <SecretSourceSelect
-                      value={sourceId}
-                      sources={sources}
-                      label={gt("{company} API key", { company })}
-                      disabled={busy}
-                      onValueChange={(next) => {
-                        setSourceId(next);
-                        setDraft("");
-                        setError("");
-                      }}
-                    />
+              <div className="grid gap-4">
+                {provider === "openrouter" && (
+                  <OpenRouterSignIn
+                    prepared={prepared}
+                    disabled={busy}
+                    onSignedIn={() => {
+                      refresh();
+                      if (!active) onEnable();
+                      close();
+                    }}
+                  />
+                )}
+                <form
+                  id={formId}
+                  className="grid gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (credential !== undefined) void saveKey(credential, !active);
+                  }}
+                >
+                  {/* With sign-in offered, its divider names the key field instead. */}
+                  {provider !== "openrouter" && (
+                    <Label htmlFor="read-aloud-cloud-key">
+                      <T>API key</T>
+                    </Label>
                   )}
-                  <div className="min-w-0 flex-1">
-                    {sourceId !== null ? (
-                      <Input
-                        key={sourceId}
-                        id="read-aloud-cloud-key"
-                        aria-label={gt("{company} API key reference", { company })}
-                        autoFocus
-                        placeholder={source?.referencePlaceholder}
-                        value={draft}
+                  <div className="flex min-w-0 items-start gap-2">
+                    {sources.length > 0 && (
+                      <SecretSourceSelect
+                        value={sourceId}
+                        sources={sources}
+                        label={gt("{company} API key", { company })}
                         disabled={busy}
-                        autoComplete="off"
-                        spellCheck={false}
-                        onChange={(event) => setDraft(event.target.value)}
-                      />
-                    ) : (
-                      <SecretInput
-                        id="read-aloud-cloud-key"
-                        aria-label={gt("{company} API key", { company })}
-                        autoFocus
-                        placeholder={gt("Enter API key")}
-                        value={draft}
-                        configured={saved}
-                        disabled={busy}
-                        maxLength={4096}
-                        onChange={(event) => setDraft(event.target.value)}
+                        onValueChange={(next) => {
+                          setSourceId(next);
+                          setDraft("");
+                          setError("");
+                        }}
                       />
                     )}
+                    <div className="min-w-0 flex-1">
+                      {sourceId !== null ? (
+                        <Input
+                          key={sourceId}
+                          id="read-aloud-cloud-key"
+                          aria-label={gt("{company} API key reference", { company })}
+                          autoFocus
+                          placeholder={source?.referencePlaceholder}
+                          value={draft}
+                          disabled={busy}
+                          autoComplete="off"
+                          spellCheck={false}
+                          onChange={(event) => setDraft(event.target.value)}
+                        />
+                      ) : (
+                        <SecretInput
+                          id="read-aloud-cloud-key"
+                          aria-label={gt("{company} API key", { company })}
+                          autoFocus
+                          placeholder={gt("Enter API key")}
+                          value={draft}
+                          configured={saved}
+                          disabled={busy}
+                          maxLength={4096}
+                          onChange={(event) => setDraft(event.target.value)}
+                        />
+                      )}
+                    </div>
                   </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {draft.trim() && !credential
-                    ? (source?.invalidReferenceMessage ??
-                      gt("Enter an API key, not a URL or secret reference."))
-                    : active
-                      ? gt("Updating the key keeps read aloud on.")
-                      : gt("Anyone with access to {environment} can bill this key.", {
-                          environment: environment.label,
-                        })}
-                </p>
-              </form>
+                  {draft.trim() && !credential ? (
+                    <p className="text-sm text-muted-foreground">
+                      {source?.invalidReferenceMessage ??
+                        gt("Enter an API key, not a URL or secret reference.")}
+                    </p>
+                  ) : active ? (
+                    <p className="text-sm text-muted-foreground">
+                      {gt("Updating the key keeps read aloud on.")}
+                    </p>
+                  ) : null}
+                </form>
+              </div>
             ) : !saved ? (
               <p>
                 <T>

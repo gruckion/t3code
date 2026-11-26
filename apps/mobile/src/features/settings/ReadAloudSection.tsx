@@ -3,11 +3,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as Speech from "expo-speech";
-import { useGT } from "gt-react-native";
+import { useGT, useLocale } from "gt-react-native";
 import { ScrollView, TextInput, View } from "react-native";
 import {
   AuthSettingsWriteScope,
-  CloudSpeechProvider,
+  CloudSpeechSynthesisProvider,
   DEFAULT_READ_ALOUD_SETTINGS,
   READ_ALOUD_LABELS,
   EMPTY_SPEECH_SYNTHESIS_CATALOG,
@@ -21,6 +21,7 @@ import {
   removeSpeechSynthesisModel,
   setCloudSpeechKey,
 } from "@t3tools/client-runtime/voice-input";
+import { readAloudWordAlignment } from "@t3tools/client-runtime/read-aloud";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironments } from "../../state/environments";
@@ -32,16 +33,20 @@ import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { ListToggleRow } from "../../components/ui/ListToggleRow";
 import { Sheet } from "../../components/ui/Sheet";
 import { Button } from "../../components/ui/Button";
+import { OpenRouterSignIn } from "./OpenRouterSignIn";
 import { runSpeech } from "../voice-input/voiceDestination";
 import { readAloudController } from "../read-aloud/playback";
 
 export function ReadAloudSection() {
   const gt = useGT();
+  const locale = useLocale();
   const preferences = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomCommand(saveMobilePreferences);
   const settings = AsyncResult.isSuccess(preferences)
     ? (preferences.value.readAloud ?? DEFAULT_READ_ALOUD_SETTINGS)
     : DEFAULT_READ_ALOUD_SETTINGS;
+  const alignment = readAloudWordAlignment(settings, locale);
+  const englishLocale = /^en(?:-|$)/i.test(locale);
   const prepared = Option.getOrNull(usePreparedConnection(settings.environmentId));
   const canManage = useEnvironmentScope(settings.environmentId, AuthSettingsWriteScope);
   const { environments } = useEnvironments();
@@ -108,7 +113,10 @@ export function ReadAloudSection() {
   useEffect(() => {
     if (!prepared || settings.provider === "system" || settings.provider === "off") return;
     const abort = new AbortController();
-    void runSpeech(getSpeechSynthesisModels(prepared, settings.provider), abort.signal).then(
+    void runSpeech(
+      getSpeechSynthesisModels(prepared, settings.provider, alignment),
+      abort.signal,
+    ).then(
       (value) => {
         if (!abort.signal.aborted)
           setCatalogState({
@@ -132,7 +140,7 @@ export function ReadAloudSection() {
       abort.abort();
       keyRequestVersion.current++;
     };
-  }, [prepared, settings.provider, catalogKey, catalogVersion]);
+  }, [prepared, settings.provider, catalogKey, catalogVersion, alignment]);
   const selectedModel = catalog.models.find((entry) => entry.id === model);
   const install = settings.provider === "local" ? selectedModel?.install : undefined;
   // Keyed by environment and model, so switching models mid-download doesn't move the spinner.
@@ -255,6 +263,16 @@ export function ReadAloudSection() {
               value={settings.skipCodeBlocks}
               onValueChange={(skipCodeBlocks) => change({ skipCodeBlocks })}
             />
+            {englishLocale && catalog.wordTimings !== "provider" ? (
+              <ListToggleRow
+                label={gt("Multilingual word timing")}
+                description={gt(
+                  "Highlight the spoken word in 25 languages. Downloads a 740 MB model instead of a 135 MB one.",
+                )}
+                value={settings.multilingualWordTiming}
+                onValueChange={(multilingualWordTiming) => change({ multilingualWordTiming })}
+              />
+            ) : null}
             <ListActionRow
               label={
                 state.id === "preview" && state.status !== "error"
@@ -314,11 +332,20 @@ export function ReadAloudSection() {
           footer={gt("Leave this empty to keep using the key already saved for dictation.")}
         >
           <View className="gap-3 p-4">
+            {catalog.apiKeyProvider === "openrouter" && (
+              <OpenRouterSignIn
+                prepared={prepared}
+                onSignedIn={() => setCatalogVersion((value) => value + 1)}
+              />
+            )}
             <TextInput
               accessibilityLabel={gt("Read-aloud API key")}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="off"
+              textContentType="none"
+              importantForAutofill="no"
               className="rounded-lg border border-border-subtle px-3 py-2 text-foreground"
               value={key}
               onChangeText={setKey}
@@ -438,7 +465,7 @@ export function ReadAloudSection() {
                     key={environment.environmentId}
                     title={gt("Cloud via {environment}", { environment: environment.label })}
                   >
-                    {CloudSpeechProvider.literals.map((provider) => (
+                    {CloudSpeechSynthesisProvider.literals.map((provider) => (
                       <ListChoiceRow
                         key={provider}
                         label={READ_ALOUD_LABELS[provider]}

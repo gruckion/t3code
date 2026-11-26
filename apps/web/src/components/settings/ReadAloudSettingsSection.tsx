@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { T, useGT, Var } from "gt-react";
+import { T, useGT, useLocale, Var } from "gt-react";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import {
@@ -11,8 +11,9 @@ import {
   removeSpeechSynthesisModel,
 } from "@t3tools/client-runtime/voice-input";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import { readAloudWordAlignment } from "@t3tools/client-runtime/read-aloud";
 import {
-  CloudSpeechProvider,
+  CloudSpeechSynthesisProvider,
   AuthFilesystemReadScope,
   AuthSettingsWriteScope,
   CLOUD_SPEECH_PROVIDER_NAMES,
@@ -293,7 +294,7 @@ export function ReadAloudSettingsSection() {
   const [catalogVersion, setCatalogVersion] = useState(0);
   // A hosted provider is confirmed in its key dialog before read aloud switches to it.
   const [pendingCloud, setPendingCloud] = useState<{
-    readonly provider: CloudSpeechProvider;
+    readonly provider: CloudSpeechSynthesisProvider;
     readonly environmentId: EnvironmentId;
   } | null>(null);
   const catalogKey = JSON.stringify([settings.environmentId, settings.provider]);
@@ -330,6 +331,9 @@ export function ReadAloudSettingsSection() {
     readAloudController.getSnapshot,
   );
   const remote = settings.provider !== "off" && settings.provider !== "system";
+  const locale = useLocale();
+  const alignment = readAloudWordAlignment(settings, locale);
+  const englishLocale = /^en(?:-|$)/i.test(locale);
   const change = (patch: Partial<ReadAloudSettings>) => {
     readAloudController.stop();
     void updateClientSettings({ readAloud: { ...settings, ...patch } });
@@ -347,7 +351,7 @@ export function ReadAloudSettingsSection() {
     if (!remote || !prepared) return;
     const abort = new AbortController();
     void runEnvironmentSpeech(
-      getSpeechSynthesisModels(prepared, settings.provider as SpeechSynthesisProvider),
+      getSpeechSynthesisModels(prepared, settings.provider as SpeechSynthesisProvider, alignment),
       { signal: abort.signal },
     ).then(
       (result) => {
@@ -370,7 +374,7 @@ export function ReadAloudSettingsSection() {
       },
     );
     return () => abort.abort();
-  }, [prepared, remote, settings.provider, catalogKey, catalogVersion]);
+  }, [prepared, remote, settings.provider, catalogKey, catalogVersion, alignment]);
   const modelEntry = catalog.models.find((entry) => entry.id === model);
   const voices =
     settings.provider === "system"
@@ -381,7 +385,9 @@ export function ReadAloudSettingsSection() {
         }));
   const source = remote ? `${settings.provider}:${settings.environmentId}` : settings.provider;
   const cloudProvider =
-    remote && settings.provider !== "local" ? (settings.provider as CloudSpeechProvider) : null;
+    remote && settings.provider !== "local"
+      ? (settings.provider as CloudSpeechSynthesisProvider)
+      : null;
   const [keys] = useCloudRead(cloudProvider ? prepared : null, getCloudSpeechKeys);
   const keyMissing =
     cloudProvider !== null && AsyncResult.isSuccess(keys) && keys.value?.[cloudProvider] === false;
@@ -439,7 +445,7 @@ export function ReadAloudSettingsSection() {
                       });
                     else
                       setPendingCloud({
-                        provider: provider as CloudSpeechProvider,
+                        provider: provider as CloudSpeechSynthesisProvider,
                         environmentId: environment.environmentId,
                       });
                   }
@@ -458,17 +464,24 @@ export function ReadAloudSettingsSection() {
                         <SpeechProviderIcon provider={settings.provider} />
                       )}
                       <span className="truncate">
-                        {settings.provider === "local"
-                          ? (selectedEnvironment?.label ?? gt("Chosen environment (unavailable)"))
-                          : remote
-                            ? gt("{provider} via {environment}", {
-                                provider: READ_ALOUD_LABELS[settings.provider],
-                                environment:
-                                  selectedEnvironment?.label ?? gt("unavailable environment"),
-                              })
-                            : settings.provider === "system"
-                              ? gt("System voices")
-                              : gt("Off", { $context: "read aloud disabled" })}
+                        {settings.provider === "local" ? (
+                          (selectedEnvironment?.label ?? gt("Chosen environment (unavailable)"))
+                        ) : remote ? (
+                          // The environment is muted, as in the transcription picker.
+                          <T>
+                            <Var>{READ_ALOUD_LABELS[settings.provider]}</Var>{" "}
+                            <span className="text-muted-foreground">
+                              via{" "}
+                              <Var>
+                                {selectedEnvironment?.label ?? gt("unavailable environment")}
+                              </Var>
+                            </span>
+                          </T>
+                        ) : settings.provider === "system" ? (
+                          gt("System voices")
+                        ) : (
+                          gt("Off", { $context: "read aloud disabled" })
+                        )}
                       </span>
                     </span>
                   </SelectValue>
@@ -516,7 +529,7 @@ export function ReadAloudSettingsSection() {
                           Cloud via <Var>{environment.label}</Var>
                         </T>
                       </SelectGroupLabel>
-                      {CloudSpeechProvider.literals.map((provider) => (
+                      {CloudSpeechSynthesisProvider.literals.map((provider) => (
                         <SelectItem
                           key={provider}
                           value={`${provider}:${environment.environmentId}`}
@@ -738,6 +751,21 @@ export function ReadAloudSettingsSection() {
               />
             }
           />
+          {remote && englishLocale && catalog.wordTimings !== "provider" ? (
+            <SettingsRow
+              title={gt("Multilingual word timing")}
+              description={gt(
+                "Highlight the spoken word in 25 languages, not just English. Downloads a 740 MB model to the selected environment instead of a 135 MB one.",
+              )}
+              control={
+                <Switch
+                  aria-label={gt("Time words in 25 languages")}
+                  checked={settings.multilingualWordTiming}
+                  onCheckedChange={(multilingualWordTiming) => change({ multilingualWordTiming })}
+                />
+              }
+            />
+          ) : null}
           <SettingsRow
             title={gt("Preview", { $context: "noun, a sample of the voice" })}
             description={
