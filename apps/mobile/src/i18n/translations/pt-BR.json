@@ -66,7 +66,6 @@
   "2f6e4f7cd364da73": "Resultado esperado",
   "9d11c93d4035de3e": "O que aconteceu",
   "c87d0595693704f9": "Alternativa utilizada",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} caracteres",
   "f5114fb9c40fd929": "Você",
   "cd03eb1b84271c02": "Agente",
   "bfe1a60f3f9c60fb": "Turno {turn} · {what}",
@@ -1297,7 +1296,6 @@
   "c13753167634f7aa": "Leu o arquivo",
   "5ce648cd03020fd9": "Leu {path} e mais {count}",
   "5d6c2898401c94e6": "Leu {path}",
-  "612170d804b03320": "{count, plural, one {{count} registro de uso malformado ou inconsistente foi ignorado; o uso pode estar incompleto.} other {{count} registros de uso malformados ou inconsistentes foram ignorados; o uso pode estar incompleto.}}",
   "ee448ceb6820ce2f": "{environment} roda uma versão mais antiga do servidor e fica fora dos totais.",
   "732708950237004e": "Este cliente é mais antigo que o servidor em {environment}; o uso dele fica fora dos totais.",
   "9758c2ede06aa19b": "Hoje às {hour}",
@@ -3283,10 +3281,7 @@
   "40b518245fdaff8f": "Verificando chaves de API…",
   "8ed10b4eeb4108de": "O áudio é enviado por {environment} usando a chave de API dele.",
   "f333fe5e33af7bef": "Atualize o ambiente para usar este provedor",
-  "b986fae0b620d8e4": "{model} · Toque para trocar o modelo ou a chave",
-  "a1ac4180684d6eff": "{model} · Toque para trocar o modelo",
   "974c12c85fd4d19e": "Toque para gerenciar a chave",
-  "7ea06a082b99bb8f": "Chave de API salva · escolha um modelo para usá-la",
   "560ac67ee42ea012": "Chave de API salva",
   "c8dec17d48f0c93a": "Adicione uma chave de API para usar este provedor",
   "f30561e30ee8a64d": "Peça a um administrador do ambiente para adicionar uma chave de API",
@@ -3295,7 +3290,6 @@
   "0c5f24ba4be2d212": "Usar {provider}",
   "5e7930d71a5c7f7c": "Informe uma chave de API válida.",
   "7d8a206fd3f67264": "Usa a chave de API salva neste ambiente. A escolha do modelo vale só para este dispositivo.",
-  "0a9e4d44c145cd07": "Qualquer pessoa com acesso ao ditado em {environment} pode gerar cobranças nesta chave.",
   "df7658221f3e8971": "Atualiza a chave da {company} em {environment}. O destino do seu ditado continua o mesmo.",
   "c58d3c64027807c6": "Não foi possível carregar os modelos · Tentar novamente",
   "dddfe3741f379a11": "Carregando modelos de transcrição…",
@@ -5187,7 +5181,6 @@
   "0b363b02a7e17bcb": "Custo bruto de tokens",
   "ea4beda46b22b8b0": "Tokens processados",
   "212d974007cacf3f": "* se cobrado pela taxa cheia da API",
-  "82bc7f1cc5a039fc": "{count, plural, one {Em {sessions} sessões} other {Em {sessions} sessões}}",
   "2a57181a9d128463": "{share} do custo · {tokens} tokens",
   "d8a6a99fbdda0d3e": "{share} dos tokens · {cost}",
   "19a3f4f2ba09e787": "Totais",
@@ -5667,5 +5660,104 @@
   "0eceb5780908eb6c": "Ler em voz alta",
   "1405f6ff92c1041a": "Não foi possível alterar o modelo. Tente novamente.",
   "81923647f1ef9740": "Cancelar geração de voz",
-  "e5ad64bb69db1045": "Pausar leitura"
+  "e5ad64bb69db1045": "Pausar leitura",
+  "53dac468c9738c4e": "Ir para o trecho atual",
+  "20a054556a7395b2": "Entrar com o OpenRouter",
+  "81d703184fe5112e": "Executar os hooks de push deste repositório?",
+  "69150fe436b3a0c2": "{count, plural, one {{count} registro de uso malformado ou inconsistente foi ignorado; o uso pode estar incompleto.} other {{count} registros de uso malformados ou inconsistentes foram ignorados; o uso pode estar incompleto.}}",
+  "0f93532dd76391fc": "Você respondeu {choice}",
+  "796b81c4875c4feb": [
+    "O app ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " precisa de um servidor ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " mais recente neste ambiente. Atualize o servidor para usá-lo."
+  ],
+  "449e39e08a0879ce": "Código do OpenRouter",
+  "0398ca6c1d24b92d": "na fila, o próximo",
+  "8a0a725cd4a505ce": "Velocidade de reprodução",
+  "3759768c5d342c22": [
+    "respondida",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "7e1fd2eb570a372b": "{who} respondeu {choice}",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} caractere} other {{speaker} · {count} caracteres}}",
+  "1ca2facc399b6d4c": "Concluir",
+  "8ccf7e0def66d339": "Suas configurações do Claude desativam o modo automático.",
+  "7e27789f5d58960e": "As configurações do Claude desativam o modo automático.",
+  "7150557773b3818b": "Na fila",
+  "0d5aac55ed15a52c": "Não foi possível acessar o OpenRouter. Tente novamente.",
+  "04ac2410d2cc0666": "As configurações do Claude deste projeto desativam o modo automático.",
+  "b1404122fa62a7d8": "O OpenRouter não aceitou este login. Entre novamente.",
+  "796ab9d04e7b4f96": "Este login do OpenRouter expirou. Entre novamente.",
+  "1235caa9d67f09c6": "Sincronização de palavras multilíngue",
+  "1a1beecff68a6e61": "Verificar conta Google",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " precisa de um motivo."
+  ],
+  "dc28e2793b510896": "Preparando a fala",
+  "ade585910165bb52": "Hook configurado",
+  "bc5e8f45269a432e": "ou cole uma chave de API",
+  "34065b700e23a8ae": "Não foi possível iniciar o login com o OpenRouter. Tente novamente.",
+  "069e0382ff2496f5": "As configurações do Claude da sua organização desativam o modo automático.",
+  "027b0d65c7a67af6": "Arquivo de hook",
+  "2cf284a7b130b411": "Entrar novamente",
+  "45340a7dc1f89d51": "{count, plural, one {Em {sessions} sessão} other {Em {sessions} sessões}}",
+  "1c68db6bfe3f1a9e": "Destaca a palavra falada em 25 idiomas. Baixa um modelo de 740 MB em vez de um de 135 MB.",
+  "efbeb3993ee2c3f5": "Na fila de {pool}",
+  "235902a19e95833b": [
+    "por você,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "1b978e981c03ece2": "O OpenRouter não aceitou este código. Entre novamente.",
+  "1b799ebfa94c2408": "Aprovação de hooks de push",
+  "a3c43735e1a81498": "Motivo para {title}",
+  "8afa4fbe16f95bcf": [
+    "por ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "6f321f153b8711bb": "Escolha uma opção",
+  "98f5e5fa1c6b0c62": "Conclua o login no OpenRouter e depois volte aqui.",
+  "bfad234f016cfa3f": "O motivo, em uma frase. Ele acompanha a resposta que você escolher.",
+  "a092ae05913a1f09": "Velocidade de reprodução: {speed}×",
+  "0af6d5ffd5166214": "{count, plural, one {na fila, {count} à frente} other {na fila, {count} à frente}}",
+  "13b14784f8707ddd": "0 bytes",
+  "3ee30a50b70fffab": "Retirada por {by}: {reason}",
+  "46d614fa7b4bf1e5": "Execuções de workflow",
+  "201490988858b511": "retirada por {by}",
+  "99451a5d2d40440f": "Retirada por {by}."
 }

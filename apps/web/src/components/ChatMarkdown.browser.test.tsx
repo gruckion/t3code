@@ -248,7 +248,7 @@ it("paints the block and the repeated word being read aloud, and clears them on 
 
 it("reads from a clicked block or a selected point only while that reply is read", async () => {
   const markdown =
-    "Intro.\n\nSecond **part** here.\n\n- First item\n- Second item\n\n```sh\nls\n```";
+    "Intro.\n\nSecond **part** here.\n\n- First item\n- Second item\n\n```sh\nls\n```\n\n| Step | Result |\n| --- | --- |\n| Read | 1 file |\n| Edit | 12 passed |";
   await using screen = await render(
     <div
       ref={readAloudHighlightRoot("reply")}
@@ -279,7 +279,35 @@ it("reads from a clicked block or a selected point only while that reply is read
 
   const part = screen.getByText("part").element().firstChild;
   expect(part && readAloudSourceAt("reply", markdown, part, 2)).toBe(markdown.indexOf("part"));
+  // Cells hold no whitespace between them; a cell's word must not run into its neighbors.
+  const cell = screen.getByText("Edit", { exact: true }).element().firstChild;
+  expect(cell && readAloudSourceAt("reply", markdown, cell, 0)).toBe(markdown.indexOf("Edit"));
   expect(readAloudSourceAt("other", markdown, document.body, 0)).toBeNull();
+  readAloudController.stop();
+  await reading;
+});
+
+it("highlights the words of a block whose last word renders as a chip or with a footnote mark", async () => {
+  const markdown =
+    "Run the tests and open `apps/server/src/speech/SpeechAligner.ts:120`\n\nThis is cited[^1]\n\n[^1]: The spec.";
+  await using _screen = await render(
+    <div ref={readAloudHighlightRoot("reply")}>
+      <ChatMarkdown cwd="/tmp/project" text={markdown} />
+    </div>,
+  );
+  const reading = readAloudController.start("reply", markdown, {
+    ...DEFAULT_READ_ALOUD_SETTINGS,
+    provider: "system",
+  });
+  await vi.waitFor(() => expect(readAloudController.getSnapshot().status).toBe("playing"));
+  const spoken = readAloudText(markdown, true);
+  const painted = async (word: string) => {
+    const at = spoken.indexOf(word);
+    await act(() => readAloudWords.emit({ start: at, end: at + word.length }));
+    return [...(CSS.highlights.get("t3-read-aloud-word") ?? [])].map(String);
+  };
+  expect(await painted("tests")).toEqual(["tests"]);
+  expect(await painted("This")).toEqual(["This"]);
   readAloudController.stop();
   await reading;
 });
@@ -413,19 +441,37 @@ it("sizes a raw HTML image by width and height written with px units", async () 
   expect({ width, height }).toEqual({ width: 14, height: 7 });
 });
 
-it("reuses the parse of a streaming reply's finished blocks when it remounts", async () => {
+it("fades a streaming reply's blocks in once, not again when it remounts", async () => {
   setup();
+  const isFading = (element: Element) =>
+    element.getAnimations().some((animation) => animation instanceof CSSTransition);
   const message = (
-    <ChatMarkdown cwd="/tmp/project" text={"Finished block\n\nStill growing"} isStreaming />
+    <ChatMarkdown
+      cwd="/tmp/project"
+      text={"Finished block\n\nStill growing"}
+      isStreaming
+      streamingId="remounted-reply"
+    />
   );
   {
     await using first = await render(
-      <ChatMarkdown cwd="/tmp/project" text={"Finished block\n\n"} isStreaming />,
+      <ChatMarkdown
+        cwd="/tmp/project"
+        text={"Finished block\n\n"}
+        isStreaming
+        streamingId="remounted-reply"
+      />,
+    );
+    await vi.waitFor(() =>
+      expect(isFading(first.getByText("Finished block").element())).toBe(true),
     );
     await first.rerender(message);
+    await vi.waitFor(() => expect(isFading(first.getByText("Still growing").element())).toBe(true));
   }
   await using screen = await render(message);
-  await expect.element(screen.getByText("Still growing")).toBeVisible();
+  await expect
+    .element(screen.getByText("Still growing"))
+    .toHaveStyle({ opacity: "1", transitionDuration: "0s" });
   expect(parsedSources.filter((source) => source.includes("Finished block"))).toHaveLength(1);
 });
 

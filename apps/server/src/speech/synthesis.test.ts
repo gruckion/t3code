@@ -14,7 +14,13 @@ import * as CloudSpeech from "./CloudSpeech.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
 import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import { localSynthesisLanguage, localSynthesisRuntime } from "./LocalSpeechSynthesis.ts";
-import { encodeMp3, leadingSentence, pcm16Mono } from "./synthesisAudio.ts";
+import {
+  encodeMp3,
+  pcm16Mono,
+  speechLines,
+  splitAtPunctuation,
+  supertonicText,
+} from "./synthesisAudio.ts";
 
 it("encodes model samples as clipped mono 16-bit PCM", () => {
   const pcm = pcm16Mono(Float32Array.of(0, 1, -1, 2, -2, Number.NaN, 0.5), 1);
@@ -22,13 +28,28 @@ it("encodes model samples as clipped mono 16-bit PCM", () => {
   expect([...pcm16Mono(Float32Array.of(1, -1, 0.5, 0.5), 2)]).toEqual([0, 16383]);
 });
 
-const longLine = `${"word ".repeat(40)}end.`;
-it.each([
-  ["Fixed it.\nThe cause was a race.\nDone.", ["Fixed it.", "The cause was a race.\nDone."]],
-  ["Only one sentence.", ["Only one sentence."]],
-  [`${longLine}\nNext.`, [`${longLine}\nNext.`]],
-])("synthesizes a short opening sentence on its own: %j", (text, parts) => {
-  expect(leadingSentence(text)).toEqual(parts);
+it("speaks one line at a time and halves a refused line at its latest break before the middle", () => {
+  expect(speechLines("Fixed it.\n\nThe cause was a race.\nDone.")).toEqual([
+    "Fixed it.",
+    "The cause was a race.",
+    "Done.",
+  ]);
+  // Kokoro's reference waterfall: sentence ends, then clauses, then commas, then any space.
+  expect(splitAtPunctuation("It took 2 min. Memory fell 66%. Version 1.2.3 ships today.")).toEqual([
+    "It took 2 min. ",
+    "Memory fell 66%. Version 1.2.3 ships today.",
+  ]);
+  expect(splitAtPunctuation("First, second, third, fourth and fifth")).toEqual([
+    "First, second, ",
+    "third, fourth and fifth",
+  ]);
+  expect(splitAtPunctuation("word")).toBeUndefined();
+});
+
+it("cleans text the way Supertonic's reference implementation does before it reads it", () => {
+  expect(supertonicText("Done 🎉 — all 12 pass 👍.\n✅ passing, “quoted” at @claude")).toBe(
+    'Done - all 12 pass.\npassing, "quoted" at at claude',
+  );
 });
 
 // An MPEG audio frame header's version bits and sample-rate index give the encoded rate.
@@ -264,24 +285,28 @@ it.effect("places ElevenLabs word timings of later pieces after the earlier piec
   }),
 );
 
-it.effect.each(["openai", "xai", "openrouter"] as const)(
+it.effect.each(["xai", "openrouter"] as const)(
   "synthesizes with %s without leaking keys to another destination",
   (provider) =>
     Effect.gen(function* () {
+      const openRouterModels = [
+        { id: "google/gemini-test-tts", name: "Speech", supported_voices: ["reader"] },
+        {
+          id: "heygen/heygen-voice-1-turbo",
+          name: "HeyGen Voice 1 Turbo",
+          supported_voices: ["nadine"],
+        },
+        { id: "minimax/speech-test:free", supported_voices: null },
+      ];
       const upstream = vi.fn<typeof fetch>(async (url) =>
         String(url).endsWith("/voices")
           ? Response.json({ voices: [{ voice_id: "reader" }] })
           : String(url).includes("/models")
-            ? Response.json({
-                data: [
-                  { id: "google/gemini-test-tts", name: "Speech", supported_voices: ["reader"] },
-                  { id: "minimax/speech-test:free", supported_voices: null },
-                ],
-              })
+            ? Response.json({ data: openRouterModels })
             : new Response(new Uint8Array([73, 68, 51, 1]), {
                 headers: {
                   "content-type":
-                    provider === "openrouter" ? "audio/pcm;rate=44100;channels=1" : "audio/mpeg",
+                    provider === "openrouter" ? "audio/pcm;rate=44100;channels=1" : "audio/pcm",
                 },
               }),
       );
@@ -297,14 +322,11 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
               ),
             ),
           );
-        yield* service.setKey(
-          provider === "openai" ? "xai" : "openai",
-          Redacted.make("must-not-be-forwarded"),
-        );
+        yield* service.setKey("openai", Redacted.make("must-not-be-forwarded"));
         const request = {
           text: "Read this reply.",
-          model: provider === "openai" ? "gpt-4o-mini-tts" : "google/gemini-test-tts",
-          voice: provider === "openai" ? "alloy" : "reader",
+          model: "google/gemini-test-tts",
+          voice: "reader",
           speed: 1.25,
           language: "en",
         };
@@ -334,26 +356,17 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
           );
           yield* Effect.promise(() => requested.promise);
           yield* service.setKey(provider, null);
-          catalog.resolve(
-            Response.json({
-              data: [
-                { id: request.model, name: "Speech", supported_voices: ["reader"] },
-                { id: "minimax/speech-test:free", supported_voices: null },
-              ],
-            }),
-          );
+          catalog.resolve(Response.json({ data: openRouterModels }));
           expect(yield* Fiber.join(pending)).toMatchObject({ reason: "key-changed" });
           expect(upstream).toHaveBeenCalledTimes(1);
           yield* service.setKey(provider, Redacted.make("speech-key"));
           upstream.mockClear();
         }
         const result = yield* synthesize(provider, request);
-        if (provider === "openrouter") expect(mp3SampleRate(result)).toBe(44100);
-        else expect([...result]).toEqual([73, 68, 51, 1]);
+        expect(mp3SampleRate(result)).toBe(provider === "openrouter" ? 44100 : 24000);
         const [url, init] = upstream.mock.calls[0]!;
         expect(String(url)).toBe(
           {
-            openai: "https://api.openai.com/v1/audio/speech",
             xai: "https://api.x.ai/v1/tts",
             openrouter: "https://openrouter.ai/api/v1/audio/speech",
           }[provider],
@@ -362,12 +375,18 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
         expect(init?.redirect).toBe("error");
         expect(JSON.parse(String(init?.body))).toMatchObject(
           provider === "xai"
-            ? { text: request.text, voice_id: request.voice, language: "en", speed: 1.25 }
+            ? {
+                text: request.text,
+                voice_id: request.voice,
+                language: "en",
+                speed: 1.25,
+                output_format: { codec: "pcm", sample_rate: 24000 },
+              }
             : {
                 input: request.text,
                 model: request.model,
                 voice: request.voice,
-                response_format: provider === "openai" ? "mp3" : "pcm",
+                response_format: "pcm",
               },
         );
         if (provider === "openrouter")
@@ -376,37 +395,39 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
         const catalog = yield* service.synthesisModels(provider);
         expect(catalog).toMatchObject({
           apiKeyProvider: provider,
-          defaultModel:
-            provider === "openai"
-              ? "gpt-4o-mini-tts"
-              : provider === "xai"
-                ? "grok-tts"
-                : "google/gemini-test-tts",
+          defaultModel: provider === "xai" ? "grok-tts" : "heygen/heygen-voice-1-turbo",
           speedAppliedByProvider: provider !== "openrouter",
           supportsModelSelection: true,
           supportsVoiceSelection: true,
         });
-        if (provider === "openai")
-          expect(catalog.models.map((model) => model.id)).toEqual([
-            "gpt-4o-mini-tts",
-            "tts-1",
-            "tts-1-hd",
-          ]);
-        else
-          expect(catalog.models).toEqual(
-            provider === "xai"
-              ? [{ id: "grok-tts", name: "Grok TTS", voices: ["reader"] }]
-              : [
-                  { id: "google/gemini-test-tts", name: "Speech", voices: ["reader"] },
-                  { id: "minimax/speech-test:free", name: "minimax/speech-test:free", voices: [] },
-                ],
-          );
+        expect(catalog.models).toEqual(
+          provider === "xai"
+            ? [{ id: "grok-tts", name: "Grok TTS", voices: ["reader"] }]
+            : [
+                { id: "google/gemini-test-tts", name: "Speech", voices: ["reader"] },
+                {
+                  id: "heygen/heygen-voice-1-turbo",
+                  name: "HeyGen Voice 1 Turbo",
+                  voices: ["nadine"],
+                },
+                { id: "minimax/speech-test:free", name: "minimax/speech-test:free", voices: [] },
+              ],
+        );
         if (provider === "xai") {
           expect(new Headers(upstream.mock.calls.at(-1)?.[1]?.headers).get("authorization")).toBe(
             "Bearer speech-key",
           );
         }
         if (provider === "openrouter") {
+          upstream.mockResolvedValueOnce(
+            new Response(Uint8Array.of(0, 1), { headers: { "content-type": "audio/pcm" } }),
+          );
+          yield* synthesize(provider, { ...request, model: catalog.defaultModel, voice: "" });
+          expect(JSON.parse(String(upstream.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+            model: "heygen/heygen-voice-1-turbo",
+            voice: "nadine",
+            response_format: "pcm",
+          });
           yield* synthesize(provider, { ...request, voice: "" });
           expect(JSON.parse(String(upstream.mock.calls.at(-1)?.[1]?.body)).voice).toBe("reader");
           for (const [model, expectedRate] of [
@@ -485,9 +506,7 @@ it.effect.each(["openai", "xai", "openrouter"] as const)(
         yield* Effect.promise(() => reading.promise);
         yield* TestClock.adjust("2 minutes");
         expect(yield* Fiber.join(stalled)).toMatchObject({ reason: "unavailable" });
-        for (const operation of (provider === "openai"
-          ? ["synthesis"]
-          : ["catalog", "synthesis"]) as ReadonlyArray<"catalog" | "synthesis">) {
+        for (const operation of ["catalog", "synthesis"] as const) {
           let pulls = 0;
           const cancel = vi.fn();
           upstream.mockResolvedValueOnce(

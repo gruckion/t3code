@@ -32,6 +32,7 @@ import * as HttpServer from "effect/http/HttpServer";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import type * as NetAddress from "effect/net/NetAddress";
+import * as SpeechAligner from "./SpeechAligner.ts";
 import * as SpeechService from "./SpeechService.ts";
 import * as CloudSpeech from "./CloudSpeech.ts";
 import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
@@ -40,6 +41,8 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { speechHttpApiLayer } from "./http.ts";
+import * as OpenRouterSignIn from "./OpenRouterSignIn.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 const decodeSessionId = Schema.decodeUnknownSync(AuthSessionId);
 
@@ -88,6 +91,9 @@ effectIt.effect.each([false, true])(
       const { handler, dispose } = HttpRouter.toWebHandler(
         HttpApiBuilder.layer(HttpApi.make("environment").add(EnvironmentVoiceHttpApi)).pipe(
           Layer.provide(speechHttpApiLayer),
+          Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({})),
+          Layer.provide(Layer.mock(OpenRouterSignIn.OpenRouterSignIn)({})),
+          Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({})),
           Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)(local)),
           Layer.provide(
             principal(allowed ? AuthOrchestrationOperateScope : AuthSettingsWriteScope),
@@ -176,6 +182,9 @@ effectIt.live("rejects oversized chunked audio without invoking transcription", 
       HttpApi.make("environment").add(EnvironmentVoiceHttpApi),
     ).pipe(
       Layer.provide(speechHttpApiLayer),
+      Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({})),
+      Layer.provide(Layer.mock(OpenRouterSignIn.OpenRouterSignIn)({})),
+      Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({})),
       Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)({})),
       Layer.provide(principal(AuthOrchestrationOperateScope)),
       Layer.provide(
@@ -310,6 +319,9 @@ effectIt.effect(
       const { handler, dispose } = HttpRouter.toWebHandler(
         HttpApiBuilder.layer(HttpApi.make("environment").add(EnvironmentVoiceHttpApi)).pipe(
           Layer.provide(speechHttpApiLayer),
+          Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({})),
+          Layer.provide(Layer.mock(OpenRouterSignIn.OpenRouterSignIn)({})),
+          Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({})),
           Layer.provide(local),
           Layer.provide(principalWith(scopes)),
           Layer.provide(
@@ -494,6 +506,9 @@ effectIt.effect.each([
       const { handler, dispose } = HttpRouter.toWebHandler(
         HttpApiBuilder.layer(api).pipe(
           Layer.provide(speechHttpApiLayer),
+          Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({})),
+          Layer.provide(Layer.mock(OpenRouterSignIn.OpenRouterSignIn)({})),
+          Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({})),
           Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)({})),
           Layer.provide(principal(AuthOrchestrationOperateScope)),
           Layer.provide(service),
@@ -563,6 +578,9 @@ effectIt.effect("tells the client why transcript cleanup failed", () =>
     const { handler, dispose } = HttpRouter.toWebHandler(
       HttpApiBuilder.layer(HttpApi.make("environment").add(EnvironmentVoiceHttpApi)).pipe(
         Layer.provide(speechHttpApiLayer),
+        Layer.provide(Layer.mock(SpeechAligner.SpeechAligner)({})),
+        Layer.provide(Layer.mock(OpenRouterSignIn.OpenRouterSignIn)({})),
+        Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({})),
         Layer.provide(principal(AuthOrchestrationOperateScope)),
         Layer.provide(Layer.mock(SpeechService.SpeechService)({})),
         Layer.provide(Layer.mock(LocalSpeechSynthesis.LocalSpeechSynthesis)({})),

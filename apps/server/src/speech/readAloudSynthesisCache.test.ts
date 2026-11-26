@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it } from "@effect/vitest";
-import type { CloudSpeechProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
+import type { CloudSpeechSynthesisProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
 import { readAloudSpeech } from "@t3tools/shared/read-aloud";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as Effect from "effect/Effect";
@@ -21,7 +21,7 @@ const frame = Uint8Array.from({ length: 208 }, (_, index) =>
   index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : 0,
 );
 
-/** ElevenLabs with character timings for the text it is sent, or OpenAI's plain MP3. */
+/** ElevenLabs with character timings for the text it is sent, or xAI's PCM. */
 const provider = () =>
   vi.fn<typeof fetch>(async (url, init) => {
     if (!String(url).includes("elevenlabs"))
@@ -85,7 +85,7 @@ const read = (
   directory: string,
   upstream: typeof fetch,
   request: SpeechSynthesisRequest,
-  cloud: CloudSpeechProvider = "elevenlabs",
+  cloud: CloudSpeechSynthesisProvider = "elevenlabs",
 ) =>
   Effect.gen(function* () {
     const service = yield* CloudSpeech.CloudSpeech;
@@ -93,6 +93,7 @@ const read = (
     const parts = yield* service.stream(cloud, request).pipe(Stream.runCollect);
     return {
       audio: parts.reduce((size, part) => size + (part instanceof Uint8Array ? part.length : 0), 0),
+      pcm: parts.reduce((size, part) => size + ("pcm" in part ? part.pcm.length : 0), 0),
       words: parts
         .flatMap((part) => ("words" in part ? part.words : []))
         .map((word) => request.text.slice(word.start, word.end)),
@@ -149,17 +150,16 @@ describe("read aloud synthesis cache", () => {
       // ElevenLabs is not sent the speed; players apply it, so the audio is the same.
       yield* read(directory, upstream, { ...request, speed: 1.3 });
       expect(upstream).toHaveBeenCalledTimes(3);
-      // OpenAI applies the speed itself, so each speed is its own audio.
-      yield* read(directory, upstream, request, "openai");
-      yield* read(directory, upstream, { ...request, speed: 1.3 }, "openai");
-      yield* read(directory, upstream, request, "openai");
+      // xAI applies the speed itself, so each speed is its own audio.
+      const sent = yield* read(directory, upstream, request, "xai");
+      yield* read(directory, upstream, { ...request, speed: 1.3 }, "xai");
+      const cached = yield* read(directory, upstream, request, "xai");
       expect(upstream).toHaveBeenCalledTimes(5);
+      // The PCM comes back with cached audio, so words xAI does not time are timed again.
+      expect(sent.pcm).toBeGreaterThan(0);
+      expect(cached).toEqual(sent);
       // The same text sent to another provider is never shared.
-      expect(sentTexts(upstream).filter(Boolean)).toEqual([
-        "Hello there.",
-        "Hello there.",
-        "Hello there.",
-      ]);
+      expect(sentTexts(upstream)).toEqual(Array.from({ length: 5 }, () => "Hello there."));
     }).pipe(Effect.scoped),
   );
 

@@ -30,7 +30,9 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import * as SpeechModelStore from "./SpeechModelStore.ts";
+import type { SpeechSynthesisPart } from "./CloudSpeech.ts";
 import { loadLocalSynthesisModel, type LocalSynthesisModel } from "./localSynthesisWorker.ts";
+import { supertonicText } from "./synthesisAudio.ts";
 
 /** A preset the model names itself, or one it reads from its own file. */
 type LocalVoice = { readonly id: string; readonly file?: SpeechModelStore.ModelFile };
@@ -45,6 +47,8 @@ type LocalModel = {
   readonly voices: readonly LocalVoice[];
   /** eSpeak-ng data the model phonemizes with, installed and removed with it. */
   readonly espeakData?: SpeechModelStore.ModelFile;
+  /** Cleanup the model's reference implementation applies before it reads text. */
+  readonly speakable?: (text: string) => string;
 };
 
 const AUDIO_CPP_GGUF = "audio-cpp/audio.cpp-gguf";
@@ -137,6 +141,7 @@ const LOCAL_SYNTHESIS_MODELS: readonly LocalModel[] = [
     },
     appliesSpeed: true,
     voices: ["F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5"].map((id) => ({ id })),
+    speakable: supertonicText,
   },
   {
     id: "pocket-tts-english",
@@ -238,10 +243,10 @@ export class LocalSpeechSynthesis extends Context.Service<
     readonly remove: (
       modelId: string,
     ) => Effect.Effect<SpeechSynthesisCatalog, LocalSynthesisInstallError>;
-    /** MP3, delivered as each text chunk is synthesized. Stopping early cancels synthesis. */
+    /** MP3 and its PCM, delivered as each text chunk is synthesized. Stopping early cancels synthesis. */
     readonly stream: (
       request: SpeechSynthesisRequest,
-    ) => Stream.Stream<Uint8Array, SpeechSynthesisError>;
+    ) => Stream.Stream<SpeechSynthesisPart, SpeechSynthesisError>;
   }
 >()("t3/speech/LocalSpeechSynthesis") {}
 
@@ -678,7 +683,7 @@ const make = Effect.gen(function* () {
   // Untraced: it runs inside the stream's own span.
   const speak = Effect.fnUntraced(function* (
     request: SpeechSynthesisRequest,
-    queue: Queue.Queue<Uint8Array, SpeechSynthesisError | Cause.Done>,
+    queue: Queue.Queue<SpeechSynthesisPart, SpeechSynthesisError | Cause.Done>,
   ) {
     if (!runtime || !libraryPath) return yield* failure("unavailable");
     const definition = findDefinition(request.model);
@@ -700,10 +705,12 @@ const make = Effect.gen(function* () {
     );
     const model = yield* ensureWorker(definition, paths);
     const language = localSynthesisLanguage(request.language, model.languages);
+    // One encoder spans the whole reply, so PCM time is MP3 time.
+    let spokenSeconds = 0;
     const spoken = model
       .stream(
         {
-          text: request.text,
+          text: definition.speakable?.(request.text) ?? request.text,
           ...(language ? { language } : {}),
           options: {
             ...(voicePath ? { voice_embedding_file: voicePath } : { voice_id: voice.id }),
@@ -711,6 +718,10 @@ const make = Effect.gen(function* () {
           },
         },
         (bytes) => Queue.offerUnsafe(queue, bytes),
+        (pcm, rate) => {
+          Queue.offerUnsafe(queue, { pcm, rate, startSeconds: spokenSeconds });
+          spokenSeconds += pcm.length / rate;
+        },
       )
       .then(
         () => Queue.endUnsafe(queue),
@@ -725,7 +736,9 @@ const make = Effect.gen(function* () {
   });
 
   const stream = (request: SpeechSynthesisRequest) =>
-    Stream.callback<Uint8Array, SpeechSynthesisError>((queue) => speak(request, queue)).pipe(
+    Stream.callback<SpeechSynthesisPart, SpeechSynthesisError>((queue) =>
+      speak(request, queue),
+    ).pipe(
       Stream.tapError((error) =>
         error.reason === "unavailable"
           ? Effect.logWarning("Local speech synthesis failed.", error)

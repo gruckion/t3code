@@ -67,7 +67,6 @@
   "2f6e4f7cd364da73": "Förväntat",
   "9d11c93d4035de3e": "Vad som hände",
   "c87d0595693704f9": "Gjorde i stället",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} tecken",
   "f5114fb9c40fd929": "Du",
   "cd03eb1b84271c02": "Agent",
   "bfe1a60f3f9c60fb": "Omgång {turn} · {what}",
@@ -1301,7 +1300,6 @@
   "c13753167634f7aa": "Läste fil",
   "5ce648cd03020fd9": "Läste {path} +{count} till",
   "5d6c2898401c94e6": "Läste {path}",
-  "612170d804b03320": "{count, plural, one {{count} felaktig eller inkonsekvent användningspost hoppades över; användningen kan vara ofullständig.} other {{count} felaktiga eller inkonsekventa användningsposter hoppades över; användningen kan vara ofullständig.}}",
   "ee448ceb6820ce2f": "{environment} kör en äldre serverversion och räknas inte med i totalerna.",
   "732708950237004e": "Den här klienten är äldre än servern på {environment}; dess användning räknas inte med i totalerna.",
   "9758c2ede06aa19b": "{hour} i dag",
@@ -1861,7 +1859,6 @@
   "67f5b13c3c7bcd40": "Dela med gäst",
   "82da5b8b340217ac": "Starta om agentsessionen",
   "963d099509eabcd6": "Agentsessionen startas om",
-  "1d384d4fe7888a09": "Ditt nästa meddelande startar en ny session.",
   "e4b61c891fed297e": "Gå till fil",
   "d2ccdb8cd3297212": "Lägg till projekt",
   "594bcbef04093f72": "Öppna WSL-mapp",
@@ -4943,8 +4940,6 @@
   "3f5c37167aa5034f": "Webbläsarens lagring avvisade skrivningen, så inmatningsfältet lämnades som det var. Frigör webbplatsdata och försök igen.",
   "41ba6c0b5c5e8b22": "Den undanlagda prompten överlever inte en omladdning",
   "94d7f150b3f7b291": "Webbläsarens lagring är inte tillgänglig, så undanlagda promptar finns bara i minnet under den här sessionen.",
-  "f421c24666cd8c71": "Den äldsta undanlagda prompten kastades",
-  "1123f816ea2a6e3e": "Du kan lägga undan högst {max} promptar; den äldsta togs bort för att göra plats.",
   "c3a8f9b1b2e7d588": "Undanlagda bilder sparades inte",
   "fc3feba263971bce": "Prompten lades undan, men webbläsarens lagring avvisade dess bilder. De saknas om du laddar om.",
   "9e36559d0fa0cca8": "Undanlagda bilder bifogades inte",
@@ -5390,13 +5385,11 @@
   "9edae9f03274cab1": "Stöd för {platform} upptäcktes inte.",
   "9ceeca01c1c48b48": "Inga {platform}-enheter listades eftersom enhetsidentifieringen rapporterade ett problem.",
   "6cfe3b4931af6f8a": "Xcode är installerat, men ingen iOS-simulator är tillgänglig. Installera en körmiljö i Xcode-inställningarna → Components.",
-  "22750cc2c6dc56c4": "Android SDK är installerat, men ingen virtuell enhet finns. Skapa en i Android Studio → Device Manager.",
   "3e436963e11ea3bc": "{host} startar iOS-simulatorer i molnet med Expo Simulators.",
   "1a6f2df32b8307a2": "{host} startar Android-emulatorer i molnet med Expo Simulators.",
   "600c3e7ff64413cf": "Xcode och iOS-simulatorn är tillgängliga på {host}.",
   "64142a49e6bf92e7": "Xcode och iOS-simulatorn är tillgängliga.",
   "2fbdc66961a873a6": "Android SDK och emulatorn är tillgängliga på {host}.",
-  "41c86e1a0fc8f0d2": "Android SDK och emulatorn är tillgängliga.",
   "7ff8efdb29b93b6d": "Konfigurera enheter",
   "a29a9a0c5fbba6b0": "Granska vad som körs i den här miljön innan du använder simulatorer och emulatorer.",
   "13c051bd01d4daf3": "Simulatorer",
@@ -5590,7 +5583,6 @@
     },
     "-filer."
   ],
-  "774654575f014b55": "Spara den för att öppna den i en app som stöder det här filformatet.",
   "46f943a30e259620": "Ljudet är inte tillgängligt. Öppna {name}",
   "e2cf6b944d1d095d": "Ljudet är inte tillgängligt. Försök igen med {name}",
   "f08fb460ad4617d6": "Läser in {name}",
@@ -7969,7 +7961,6 @@
   "9a284b5893dc04a2": "OpenRouter-modell",
   "c8361c16c47d5fb5": "Sök transkriberingsmodeller",
   "d72eccdd92d4f989": "Kunde inte spara ändringen. Kontrollera anslutningen och försök igen.",
-  "ef5fef499da688e8": "Ersätt API-nyckel",
   "cad38c8893ab98e4": "API-nyckel",
   "42ec8bbd6819af00": "API-nyckel för {company}",
   "03d751a890780a70": "Referens till API-nyckel för {company}",
@@ -7977,9 +7968,7 @@
   "7aa0d5470ed46175": "Ange en API-nyckel, inte en URL eller en hemlighetsreferens.",
   "dad7aceef19f0f5b": "Om du uppdaterar nyckeln förblir diktering aktiverad.",
   "015e394f14d5ede0": "Lämna tomt för att behålla den sparade nyckeln.",
-  "0a9e4d44c145cd07": "Alla med dikteringsåtkomst till {environment} kan debitera den här nyckeln.",
   "55803224ee096dc0": "Ta bort nyckeln för {company}?",
-  "0a7813c7df04ffe9": "Hantera diktering med OpenRouter",
   "9996968084688efe": "Hantera nyckel för {company}",
   "bf6a4f30c36e0a87": "Använda {name} för diktering?",
   "710bec893f7881d1": "Alla som använder {name} för diktering på {environment} förlorar åtkomsten.",
@@ -8863,7 +8852,6 @@
   "a9cdd8c7073be920": "Kommandopalett: växla",
   "4e0943e8c7a465d1": "Filväljare: växla",
   "df5fdcdf26a6b52a": "Projektsökning: växla",
-  "a8ff6d33b060736f": "Användning: öppna",
   "a513d51b71b95674": "Tema: välj",
   "1ffd8427452372e1": "Utseende: växla mellan",
   "3a3bb4a7551a87cc": "Temaredigerare: växla",
@@ -9531,7 +9519,6 @@
   "33fbce50a4ea67e6": "Extra CLI-argument som skickas när sessionen startar.",
   "abdee70d90cb26a3": "Komprimera efter 100 000 till 1 000 000 token. Lämna tomt för att använda Claudes standard.",
   "f907b2466603538e": "När en inaktiv tråd över 200 000 token ska komprimeras: när du kommer tillbaka, precis innan dess promptcache går ut, eller aldrig. Åsidosätter standardvärdet i Leverantörer > Avancerat.",
-  "484df18e29b21047": "Google-konton använder din prenumeration; API-nycklar och Agent Platform debiteras efter användning.",
   "931df01584748bf9": "Express-nyckel för Gemini eller Vertex AI. Lagras separat på värden.",
   "8bf0f6ed8dd4b77e": "Krävs för Gemini Enterprise. Agent Platform använder den när ingen API-nyckel är angiven.",
   "7c735c8fbd3fb6e3": "Region för Gemini Enterprise eller Agent Platform.",
@@ -9693,10 +9680,7 @@
   "3b548795318c1063": "Narration API key",
   "6f04398aad1ae5ad": "The key for the narration model.",
   "65a238ad6bebf802": "Läsa upp svar med {name}?",
-  "bfbaa4965c146e7c": "Alla som använder {company} för diktering eller uppläsning på {environment} förlorar åtkomsten.",
-  "b9e06e668bd9bff0": "Svar som du spelar upp skickas till {company} via {environment}, som debiterar sin API-nyckel. Nyckeln delas med dikteringen.",
   "09f85302ef58020c": "Uppläsningen förblir på när du uppdaterar nyckeln.",
-  "6e58953ca9c7fad5": "Alla med åtkomst till {environment} kan debitera den här nyckeln.",
   "cf0740520675dcb9": [
     "Anslut till ",
     {
@@ -11287,7 +11271,6 @@
   "4889f7885396c26b": "Worktrees",
   "2d96fe39105aae8f": "Roterade loggar",
   "1214c77f4bf1ee81": "Webbläsarartefakter",
-  "9831e9c703b3bdd0": "{omitted, plural, one {{environment}: {count} resultat till.} other {{environment}: {count} resultat till.}}",
   "c8192b219451a0d0": "{removed} borttagna, {kept} behållna, {failed} misslyckades",
   "cbd8bf91a856906a": "{removed} borttagna, {kept} behållna",
   "754564dc0b82aff7": "{count, plural, one {Senast körd {when}. {bytes} återvunnet. {count} objekt kunde inte tas bort.} other {Senast körd {when}. {bytes} återvunnet. {count} objekt kunde inte tas bort.}}",
@@ -11805,7 +11788,6 @@
   "4b2f68f90eb004f6": "Inget tal kändes igen. Försök igen.",
   "cc04b357924afb36": "Stäng modelltestet",
   "25607ff5f39ac0ac": "Apple Speech (inte tillgängligt)",
-  "97ce6c61f0039edd": "Hantera OpenRouter",
   "ca50ce902d534122": "Hantera nyckel",
   "4993d154ece9c92f": "Röstinmatning använder den första anslutna mikrofonen i listan.",
   "501bce0d4bd2b113": "Kortkommando för diktering",
@@ -12034,7 +12016,6 @@
   "9d834d178130180e": "beta alpha simlock callstack simulator emulator ios android pool lån gateway",
   "bcb520297a9ae143": "beta snabb worktree utcheckning klon apfs copy-on-write cache macos hastighet",
   "4c83ac419da342bd": "skicka mikrofonljud diktering mål tal röst stt transkribering miljö dator samtycke integritet moln OpenAI Grok OpenRouter",
-  "3985d8550c7bc219": "tts text till tal uppläsning läs upp röst uppspelning OpenAI Grok OpenRouter ElevenLabs",
   "f9c000e92379d027": "mikrofon indata ljud enhet ordning prioritet föredragen",
   "22811f405e0b4b28": "tal röst tangentbord snabbtangent håll växla auto",
   "e27bccf50397d9fe": "tal röst översätt engelska identifiera automatiskt",
@@ -12471,7 +12452,6 @@
   "d2d071e45a2d6b89": "Välj en miljö för att se gränser.",
   "c9180daea905a0a6": "Välj en miljö för att se användning.",
   "f0297ec79e896a13": "{environment}: {error}",
-  "6dcbf651d51d4023": "{count, plural, one {{formatted} session} other {{formatted} sessioner}}",
   "b01bf98dd90ee819": "API-uppskattning",
   "bab34b28e9ee8e88": "Detaljer om användning utan pris",
   "61571f4542da9903": "{count, plural, one {{formatted} session} other {{formatted} sessioner}}",
@@ -12646,7 +12626,6 @@
   "7755500a4cde5066": "Stäng panelen",
   "b8dcbc93a2ca1861": "Körningen listar det inte längre.",
   "115c69de3202f664": "Öppna",
-  "644eafa9048b62df": "{count, plural, =1 {1:a försöket} =2 {2:a försöket} =3 {3:e försöket} other {försök {count}}}",
   "e39f89c909df4db0": "Kunde inte återuppta körningen",
   "865f034346b82f47": "Avbryta {title}? Dess agenter stoppas och körningen kan inte återupptas.",
   "6bc75632fd9c9136": "Kunde inte avbryta körningen",
@@ -12969,5 +12948,237 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "92e129bf413a1220": "återkallad",
+  "5b9fda36b610d25c": "Stoppa",
+  "8ba6febaabeb6f14": "{terminalLabel} rader {lineStart}–{lineEnd}",
+  "1ca2facc399b6d4c": "Slutför",
+  "99451a5d2d40440f": "Återkallad av {by}.",
+  "f1b18820c0ab93ac": [
+    "+",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " till i Länkade objekt"
+  ],
+  "2cf284a7b130b411": "Logga in igen",
+  "bc5e8f45269a432e": "eller klistra in en API-nyckel",
+  "f3c70064a22a0c76": "{terminalLabel} rad {lineStart}",
+  "0ca6fd2b8fcab2c3": "Användning: Visa eller dölj",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " svarade",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "efbeb3993ee2c3f5": "Köar för {pool}",
+  "49be26a27dcb30e5": "köade",
+  "81d703184fe5112e": "Köra det här repositoryts push-hooks?",
+  "1b978e981c03ece2": "OpenRouter godtog inte den här koden. Logga in igen.",
+  "90dfebe26eb86b2d": "Sidans valalternativ",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} tecken} other {{speaker} · {count} tecken}}",
+  "d5a4a3f4c97e473c": "Läser upp",
+  "06d3fe3e6b255d15": [
+    "+",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " till"
+  ],
+  "1235caa9d67f09c6": "Flerspråkig ordsynkronisering",
+  "d9e33a2a8d404a96": "{omitted, plural, one {{environment}: {count} resultat till.} other {{environment}: {count} resultat till.}}",
+  "8ccf7e0def66d339": "Dina Claude-inställningar stänger av autoläget.",
+  "b1404122fa62a7d8": "OpenRouter godtog inte den här inloggningen. Logga in igen.",
+  "1af8d12ac21cb183": "Du kan lägga undan högst {max} promptar. Återställ eller ta bort en för att göra plats; inmatningsfältet lämnades som det var.",
+  "800966eb58181745": "Kontrollerar vilka språk modellen stöder…",
+  "0398ca6c1d24b92d": "i kö, näst på tur",
+  "9610fb9f4d9849ec": "Google-konto och Gemini Enterprise använder din befintliga plan. Gemini API-nyckel och Agent Platform debiteras per användning via din nyckel eller ditt Google Cloud-projekt.",
+  "0af6d5ffd5166214": "{count, plural, one {i kö, {count} före} other {i kö, {count} före}}",
+  "3759768c5d342c22": [
+    "besvarad",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "53dac468c9738c4e": "Gå till aktuell plats",
+  "91aadfc843c600de": "Verifiera Google-konto",
+  "a4579e548b768663": "Visa sidofältet",
+  "069e0382ff2496f5": "Din organisations Claude-inställningar stänger av autoläget.",
+  "796b81c4875c4feb": [
+    "Appen ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " behöver en nyare ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    "-server i den här miljön. Uppdatera servern för att använda den."
+  ],
+  "13682ea76b1efa5d": "OpenRouter-modellen som transkriberar din diktering.",
+  "1730c80a86d1ceb9": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": [
+        "via ",
+        {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        }
+      ]
+    }
+  ],
+  "dbc3908dc1f730ab": "Android SDK är installerat, men ingen Android-enhet hittades. Anslut en telefon med USB-felsökning påslagen, eller skapa en virtuell enhet i Android Studio → Device Manager.",
+  "04ac2410d2cc0666": "Projektets Claude-inställningar stänger av autoläget.",
+  "71ed7c0da0b93c77": "Ditt nästa meddelande startar om agenten. Den här konversationen behålls.",
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " svarade",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
+  "236b7b3f5ff18a4d": "tts text till tal uppläsning läs upp röst uppspelning Grok OpenRouter ElevenLabs",
+  "3ee30a50b70fffab": "Återkallad av {by}: {reason}",
+  "34065b700e23a8ae": "Det gick inte att börja logga in med OpenRouter. Försök igen.",
+  "d3170aa2bb08efbd": "Spara den för att öppna den i en app som stöder det här filformatet.",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " kräver en anledning."
+  ],
+  "57f3bffc6b444c3d": [
+    "Svar som du spelar upp skickas till ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " via ",
+    {
+      "t": "strong",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ", som debiterar sin API-nyckel. Nyckeln delas med dikteringen."
+  ],
+  "796ab9d04e7b4f96": "Den här OpenRouter-inloggningen har gått ut. Logga in igen.",
+  "9bb4c18ca561c5c7": [
+    "Alla som använder ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " för diktering eller uppläsning på ",
+    {
+      "t": "strong",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    " förlorar åtkomsten."
+  ],
+  "410dded6e21c280d": "Undanlagringen är full",
+  "449e39e08a0879ce": "Kod från OpenRouter",
+  "69150fe436b3a0c2": "{count, plural, one {{count} felaktig eller inkonsekvent användningspost hoppades över; användningen kan vara ofullständig.} other {{count} felaktiga eller inkonsekventa användningsposter hoppades över; användningen kan vara ofullständig.}}",
+  "a2bbf464a3be4882": "{count, plural, =1 {1:a försöket} =2 {2:a försöket} =3 {3:e försöket} other {försök {count}}}",
+  "381ceed77cb8b2b3": "Stoppa {name}",
+  "98f5e5fa1c6b0c62": "Slutför inloggningen hos OpenRouter och kom sedan tillbaka hit.",
+  "0d5aac55ed15a52c": "Det gick inte att nå OpenRouter. Försök igen.",
+  "027b0d65c7a67af6": "Hook-fil",
+  "2d99f80191b88ee4": "Android SDK är tillgängligt.",
+  "b362d4f1c293a461": "Modell",
+  "20a054556a7395b2": "Logga in med OpenRouter",
+  "201490988858b511": "återkallad av {by}",
+  "4e96712d839ccbff": "{who} svarade {choice}",
+  "1b799ebfa94c2408": "Godkännande av push-hooks",
+  "ac1541a6ce6ec81e": "Synkronisera ord på 25 språk",
+  "7150557773b3818b": "I kö",
+  "d8e91bcf106d3bca": "Förbereder uppläsning",
+  "7e27789f5d58960e": "Claudes inställningar stänger av autoläget.",
+  "2830c15ca3574a86": "Markerar det upplästa ordet på 25 språk, inte bara engelska. Laddar ned en modell på 740 MB till den valda miljön i stället för en på 135 MB.",
+  "ade585910165bb52": "Konfigurerad hook",
+  "1d372f6d555dde3c": "Stoppa alla enheter",
+  "0e34c3076c08feb2": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": [
+        "↻ +",
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        "%"
+      ]
+    },
+    " ",
+    "om ",
+    {
+      "i": 3,
+      "k": "_gt_value_3",
+      "v": "v"
+    }
+  ]
 }

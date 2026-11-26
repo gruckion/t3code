@@ -8,7 +8,7 @@ export const READ_ALOUD_CACHE_MAX_BYTES = 1024 ** 3;
 /** An entry used this recently may still be read, such as by a stream that is starting. */
 export const READ_ALOUD_CACHE_IN_USE_MS = 10 * 60 * 1000;
 
-const ENTRY_FILE = /^([0-9a-f]{64})\.(?:mp3|json|text\.json)$/;
+const ENTRY_FILE = /^([0-9a-f]{64})\.(?:mp3|pcm|json|text\.json)$/;
 
 interface Entry {
   readonly files: Array<string>;

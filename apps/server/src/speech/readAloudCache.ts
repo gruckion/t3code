@@ -13,13 +13,17 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 
 /** Change it when cached audio or text must no longer be read, such as a new word format. */
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 export const readAloudCacheDirectory = (path: Path.Path, stateDir: string) =>
   path.join(stateDir, "caches", "read-aloud");
 
 const CachedWords = Schema.fromJsonString(
-  Schema.Struct({ words: Schema.Array(SpeechSynthesisWord) }),
+  Schema.Struct({
+    words: Schema.Array(SpeechSynthesisWord),
+    /** The sample rate of the entry's PCM file, when it has one. */
+    pcmRate: Schema.optionalKey(Schema.Number),
+  }),
 );
 /** A block's markdown rewritten for speech; `narrated` when a model summarized it. */
 export const SpeechText = Schema.Struct({ text: Schema.String, narrated: Schema.Boolean });
@@ -34,6 +38,8 @@ export interface CachedAudio {
   readonly audio: Uint8Array;
   /** Words with offsets in the text that was synthesized and seconds into `audio`. */
   readonly words: ReadonlyArray<SpeechSynthesisWord>;
+  /** Mono PCM the MP3 was encoded from, so words the provider did not time are timed again. */
+  readonly pcm?: { readonly samples: Int16Array; readonly rate: number };
 }
 
 /**
@@ -74,6 +80,7 @@ export const make = Effect.fnUntraced(function* (directory: string) {
       ? {
           audio: path.join(directory, `${key}.mp3`),
           words: path.join(directory, `${key}.json`),
+          pcm: path.join(directory, `${key}.pcm`),
           speechText: path.join(directory, `${key}.text.json`),
         }
       : null;
@@ -105,7 +112,14 @@ export const make = Effect.fnUntraced(function* (directory: string) {
     const audio = yield* fs.readFile(paths.audio).pipe(Effect.option);
     if (Option.isNone(words) || Option.isNone(audio) || audio.value.byteLength === 0)
       return Option.none<CachedAudio>();
-    return Option.some({ audio: audio.value, words: words.value.words });
+    const rate = words.value.pcmRate;
+    if (rate === undefined) return Option.some({ audio: audio.value, words: words.value.words });
+    const pcm = yield* fs.readFile(paths.pcm).pipe(Effect.option);
+    if (Option.isNone(pcm) || !(yield* touch([paths.pcm])) || pcm.value.byteLength % 2 !== 0)
+      return Option.none<CachedAudio>();
+    // Copied, so the samples start on a boundary an Int16Array can view.
+    const samples = new Int16Array(pcm.value.slice().buffer);
+    return Option.some({ audio: audio.value, words: words.value.words, pcm: { samples, rate } });
   });
 
   const writeAudio = Effect.fn("ReadAloudCache.writeAudio")(function* (
@@ -116,10 +130,24 @@ export const make = Effect.fnUntraced(function* (directory: string) {
     if (!paths) return;
     yield* fs.makeDirectory(directory, { recursive: true });
     yield* writeAtomically(paths.audio, entry.audio);
-    // Written last: a hit needs both files, so a crash in between reads as a miss.
+    if (entry.pcm)
+      yield* writeAtomically(
+        paths.pcm,
+        new Uint8Array(
+          entry.pcm.samples.buffer,
+          entry.pcm.samples.byteOffset,
+          entry.pcm.samples.byteLength,
+        ),
+      );
+    // Written last: a hit needs every file, so a crash in between reads as a miss.
     yield* writeAtomically(
       paths.words,
-      new TextEncoder().encode(encodeWords({ words: entry.words })),
+      new TextEncoder().encode(
+        encodeWords({
+          words: entry.words,
+          ...(entry.pcm ? { pcmRate: entry.pcm.rate } : {}),
+        }),
+      ),
     );
   }, ignoreFailure("speech audio"));
 

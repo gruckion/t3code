@@ -66,7 +66,6 @@
   "2f6e4f7cd364da73": "Erwartet",
   "9d11c93d4035de3e": "Tatsächlich passiert",
   "c87d0595693704f9": "Stattdessen getan",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} Zeichen",
   "f5114fb9c40fd929": "Du",
   "cd03eb1b84271c02": "Agent",
   "bfe1a60f3f9c60fb": "Runde {turn} · {what}",
@@ -1297,7 +1296,6 @@
   "c13753167634f7aa": "Datei gelesen",
   "5ce648cd03020fd9": "{path} gelesen +{count} weitere",
   "5d6c2898401c94e6": "{path} gelesen",
-  "612170d804b03320": "{count, plural, one {{count} fehlerhafter oder inkonsistenter Nutzungseintrag wurde übersprungen; die Nutzung ist möglicherweise unvollständig.} other {{count} fehlerhafte oder inkonsistente Nutzungseinträge wurden übersprungen; die Nutzung ist möglicherweise unvollständig.}}",
   "ee448ceb6820ce2f": "{environment} verwendet eine ältere Serverversion und wird nicht in die Summen einbezogen.",
   "732708950237004e": "Dieser Client ist älter als der Server auf {environment}; seine Nutzung wird nicht in die Summen einbezogen.",
   "9758c2ede06aa19b": "heute {hour}",
@@ -3288,10 +3286,7 @@
   "40b518245fdaff8f": "API-Schlüssel werden geprüft…",
   "8ed10b4eeb4108de": "Audio wird über {environment} mit deren API-Schlüssel gesendet.",
   "f333fe5e33af7bef": "Aktualisiere die Umgebung, um diesen Anbieter zu nutzen",
-  "b986fae0b620d8e4": "{model} · Tippen, um Modell oder Schlüssel zu ändern",
-  "a1ac4180684d6eff": "{model} · Tippen, um das Modell zu ändern",
   "974c12c85fd4d19e": "Tippen, um den Schlüssel zu verwalten",
-  "7ea06a082b99bb8f": "API-Schlüssel gespeichert · wähle ein Modell, um ihn zu nutzen",
   "560ac67ee42ea012": "API-Schlüssel gespeichert",
   "c8dec17d48f0c93a": "Füge einen API-Schlüssel hinzu, um diesen Anbieter zu nutzen",
   "f30561e30ee8a64d": "Bitte einen Administrator der Umgebung, einen API-Schlüssel hinzuzufügen",
@@ -3300,7 +3295,6 @@
   "0c5f24ba4be2d212": "{provider} verwenden",
   "5e7930d71a5c7f7c": "Gib einen gültigen API-Schlüssel ein.",
   "7d8a206fd3f67264": "Verwendet den in dieser Umgebung gespeicherten API-Schlüssel. Die Modellwahl gilt nur für dieses Gerät.",
-  "0a9e4d44c145cd07": "Alle mit Diktat-Zugriff auf {environment} können über diesen Schlüssel abrechnen.",
   "df7658221f3e8971": "Aktualisiert den {company}-Schlüssel auf {environment}. Dein Diktierziel bleibt gleich.",
   "c58d3c64027807c6": "Modelle konnten nicht geladen werden · Erneut versuchen",
   "dddfe3741f379a11": "Transkriptionsmodelle werden geladen…",
@@ -5193,7 +5187,6 @@
   "0b363b02a7e17bcb": "Rohe Token-Kosten",
   "ea4beda46b22b8b0": "Verarbeitete Tokens",
   "212d974007cacf3f": "* bei Abrechnung zum vollen API-Preis",
-  "82bc7f1cc5a039fc": "{count, plural, one {Über {sessions} Sitzung} other {Über {sessions} Sitzungen}}",
   "2a57181a9d128463": "{share} der Kosten · {tokens} Tokens",
   "d8a6a99fbdda0d3e": "{share} der Tokens · {cost}",
   "19a3f4f2ba09e787": "Summen",
@@ -5673,5 +5666,104 @@
   "0eceb5780908eb6c": "Vorlesen",
   "1405f6ff92c1041a": "Das Modell konnte nicht geändert werden. Versuchen Sie es erneut.",
   "e5ad64bb69db1045": "Vorlesen pausieren",
-  "81923647f1ef9740": "Sprachausgabe abbrechen"
+  "81923647f1ef9740": "Sprachausgabe abbrechen",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " braucht eine Begründung."
+  ],
+  "449e39e08a0879ce": "Code von OpenRouter",
+  "7e27789f5d58960e": "Die Claude-Einstellungen schalten den Auto-Modus ab.",
+  "235902a19e95833b": [
+    "von dir,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "1b978e981c03ece2": "OpenRouter hat diesen Code nicht akzeptiert. Melde dich erneut an.",
+  "53dac468c9738c4e": "Zur aktuellen Stelle",
+  "46d614fa7b4bf1e5": "Workflow-Ausführungen",
+  "201490988858b511": "zurückgezogen von {by}",
+  "0d5aac55ed15a52c": "OpenRouter ist nicht erreichbar. Versuche es erneut.",
+  "1b799ebfa94c2408": "Genehmigung für Push-Hooks",
+  "027b0d65c7a67af6": "Hook-Datei",
+  "1ca2facc399b6d4c": "Abschließen",
+  "3ee30a50b70fffab": "Zurückgezogen von {by}: {reason}",
+  "7e1fd2eb570a372b": "{who} hat {choice} geantwortet",
+  "8afa4fbe16f95bcf": [
+    "von ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "6f321f153b8711bb": "Option auswählen",
+  "ade585910165bb52": "Konfigurierter Hook",
+  "796ab9d04e7b4f96": "Diese OpenRouter-Anmeldung ist abgelaufen. Melde dich erneut an.",
+  "81d703184fe5112e": "Push-Hooks dieses Repositorys ausführen?",
+  "1a1beecff68a6e61": "Google-Konto bestätigen",
+  "0f93532dd76391fc": "Du hast {choice} geantwortet",
+  "34065b700e23a8ae": "Die Anmeldung bei OpenRouter konnte nicht gestartet werden. Versuche es erneut.",
+  "45340a7dc1f89d51": "{count, plural, one {Über {sessions} Sitzung} other {Über {sessions} Sitzungen}}",
+  "1c68db6bfe3f1a9e": "Markiert das gesprochene Wort in 25 Sprachen. Lädt ein 740-MB-Modell statt eines 135-MB-Modells herunter.",
+  "13b14784f8707ddd": "0 Byte",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} Zeichen} other {{speaker} · {count} Zeichen}}",
+  "a092ae05913a1f09": "Wiedergabegeschwindigkeit: {speed}×",
+  "8a0a725cd4a505ce": "Wiedergabegeschwindigkeit",
+  "bfad234f016cfa3f": "Warum, in einem Satz. Gilt für die Antwort, die du wählst.",
+  "69150fe436b3a0c2": "{count, plural, one {{count} fehlerhafter oder inkonsistenter Nutzungseintrag wurde übersprungen; die Nutzung ist möglicherweise unvollständig.} other {{count} fehlerhafte oder inkonsistente Nutzungseinträge wurden übersprungen; die Nutzung ist möglicherweise unvollständig.}}",
+  "efbeb3993ee2c3f5": "Wartet auf {pool}",
+  "0398ca6c1d24b92d": "wartet, als Nächstes dran",
+  "1235caa9d67f09c6": "Mehrsprachiges Wort-Timing",
+  "bc5e8f45269a432e": "oder füge einen API-Schlüssel ein",
+  "796b81c4875c4feb": [
+    "Die App ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " benötigt einen neueren ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    "-Server in dieser Umgebung. Aktualisiere den Server, um sie zu nutzen."
+  ],
+  "04ac2410d2cc0666": "Die Claude-Einstellungen dieses Projekts schalten den Auto-Modus ab.",
+  "2cf284a7b130b411": "Erneut anmelden",
+  "dc28e2793b510896": "Sprache wird vorbereitet",
+  "7150557773b3818b": "In der Warteschlange",
+  "3759768c5d342c22": [
+    "beantwortet",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "98f5e5fa1c6b0c62": "Schließe die Anmeldung bei OpenRouter ab und komm dann hierher zurück.",
+  "99451a5d2d40440f": "Zurückgezogen von {by}.",
+  "0af6d5ffd5166214": "{count, plural, one {wartet, {count} davor} other {wartet, {count} davor}}",
+  "069e0382ff2496f5": "Die Claude-Einstellungen deiner Organisation schalten den Auto-Modus ab.",
+  "b1404122fa62a7d8": "OpenRouter hat diese Anmeldung nicht akzeptiert. Melde dich erneut an.",
+  "20a054556a7395b2": "Mit OpenRouter anmelden",
+  "a3c43735e1a81498": "Begründung für {title}",
+  "8ccf7e0def66d339": "Deine Claude-Einstellungen schalten den Auto-Modus ab."
 }

@@ -1,4 +1,8 @@
-import type { SpeechSynthesisProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
+import type {
+  SpeechSynthesisProvider,
+  SpeechSynthesisRequest,
+  SpeechWordAlignment,
+} from "@t3tools/contracts";
 import { encodeSpeechPcmRequest } from "@t3tools/shared/speech";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -130,6 +134,51 @@ export const setCloudSpeechKey = (
         params: { provider },
         payload: { key: typeof key === "string" ? Redacted.make(key) : key },
       }),
+  });
+
+/**
+ * Starts signing in with OpenRouter on the environment, which creates and saves its key. OpenRouter
+ * returns to the environment when it can reach it (https, or this machine); otherwise it shows a
+ * code to finish with `finishOpenRouterSignIn`, and `pasteCode` is set.
+ */
+export const startOpenRouterSignIn = (prepared: PreparedConnection) => {
+  let callbackUrl: string | null = null;
+  return request({
+    group: "voice",
+    prepared,
+    method: "POST",
+    path: (urls) => {
+      const callback = new URL(urls.openRouterCallback());
+      callbackUrl =
+        callback.protocol === "https:" || callback.hostname === "localhost"
+          ? callback.toString()
+          : null;
+      return urls.startOpenRouterSignIn();
+    },
+    run: ({ client, headers }) =>
+      client.startOpenRouterSignIn({ headers, payload: { callbackUrl } }),
+  }).pipe(Effect.map((signIn) => ({ ...signIn, pasteCode: callbackUrl === null })));
+};
+
+/** Finishes an OpenRouter sign-in with the code OpenRouter showed. */
+export const finishOpenRouterSignIn = (prepared: PreparedConnection, state: string, code: string) =>
+  request({
+    group: "voice",
+    prepared,
+    method: "POST",
+    path: (urls) => urls.finishOpenRouterSignIn(),
+    run: ({ client, headers }) =>
+      client.finishOpenRouterSignIn({ headers, payload: { state, code } }),
+  });
+
+/** Where a started OpenRouter sign-in stands, such as signed in or expired. */
+export const getOpenRouterSignInStatus = (prepared: PreparedConnection, state: string) =>
+  request({
+    group: "voice",
+    prepared,
+    method: "POST",
+    path: (urls) => urls.openRouterSignInStatus(),
+    run: ({ client, headers }) => client.openRouterSignInStatus({ headers, payload: { state } }),
   });
 
 export const transcribeCloudPcm = (
@@ -339,17 +388,21 @@ export const removeEnvironmentSpeechModel = (prepared: PreparedConnection, model
     run: ({ client, headers }) => client.removeModel({ headers, payload: { modelId } }),
   });
 
+/** `alignment` asks the environment to fetch the model that times words this provider lacks. */
 export const getSpeechSynthesisModels = (
   prepared: PreparedConnection,
   provider: SpeechSynthesisProvider,
-) =>
-  request({
+  alignment?: SpeechWordAlignment,
+) => {
+  const query = alignment ? { alignment } : {};
+  return request({
     group: "voice",
     prepared,
     method: "GET",
-    path: (urls) => urls.synthesisModels({ params: { provider } }),
-    run: ({ client, headers }) => client.synthesisModels({ headers, params: { provider } }),
+    path: (urls) => urls.synthesisModels({ params: { provider }, query }),
+    run: ({ client, headers }) => client.synthesisModels({ headers, params: { provider }, query }),
   });
+};
 
 /** Starts synthesis and resolves, once audio exists, with the URL of its live MP3 stream and its token. */
 export const startSpeechSynthesis = (

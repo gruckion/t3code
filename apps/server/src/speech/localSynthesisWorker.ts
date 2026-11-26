@@ -2,7 +2,13 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeSea from "node:sea";
 import { bindAudioCpp, type AudioCppSynthesisRequest } from "@t3tools/audio-cpp";
-import { ENCODE_SLICE_SAMPLES, leadingSentence, mp3Kbps, pcm16Mono } from "./synthesisAudio.ts";
+import {
+  ENCODE_SLICE_SAMPLES,
+  mp3Kbps,
+  pcm16Mono,
+  speechLines,
+  splitAtPunctuation,
+} from "./synthesisAudio.ts";
 
 // Inlined like the dictation worker, so packaged builds need no separate worker artifact.
 const entry = `
@@ -13,7 +19,8 @@ const entry = `
   const bindAudioCpp = ${bindAudioCpp.toString()};
   const pcm16Mono = ${pcm16Mono.toString()};
   const mp3Kbps = ${mp3Kbps.toString()};
-  const leadingSentence = ${leadingSentence.toString()};
+  const speechLines = ${speechLines.toString()};
+  const splitAtPunctuation = ${splitAtPunctuation.toString()};
   const packageJson = (name) => {
     const path = findPackageJSON(name, baseUrl);
     if (!path) throw new Error("The " + name + " package is unavailable.");
@@ -49,17 +56,22 @@ const entry = `
         reply({ ok: true, backend: model.backend, languages: model.languages });
       } else if (message.kind === "synthesize") {
         cancelled = false;
-        // One encoder across both parts keeps the MP3 a single seamless stream.
+        // One encoder across every part keeps the MP3 a single seamless stream.
         let encoder;
-        for (const text of leadingSentence(message.request.text)) {
-          if (cancelled) break;
-          const stream = model.stream({ ...message.request, text });
+        const pending = speechLines(message.request.text);
+        while (pending.length && !cancelled) {
+          const text = pending.shift();
+          let spoke = false;
+          let stream;
           try {
+            stream = model.stream({ ...message.request, text });
             while (!cancelled) {
               const audio = stream.next();
               if (!audio) break;
+              spoke = true;
               encoder ??= new lame.Mp3Encoder(1, audio.sampleRate, mp3Kbps(audio.sampleRate));
               const pcm = pcm16Mono(audio.samples, audio.channels);
+              if (pcm.length) process.send({ type: "t3-synthesis-pcm", pcm, rate: audio.sampleRate });
               // Encoding a text chunk takes longer than synthesizing it, so send it slice by slice.
               for (let start = 0; start < pcm.length && !cancelled; start += ${ENCODE_SLICE_SAMPLES}) {
                 chunk(encoder.encodeBuffer(pcm.subarray(start, start + ${ENCODE_SLICE_SAMPLES})));
@@ -67,8 +79,20 @@ const entry = `
                 await new Promise((resolve) => setImmediate(resolve));
               }
             }
+          } catch (error) {
+            // A line already partly heard cannot be said again without repeating it.
+            if (spoke) throw error;
+            // Supertonic refuses a character outside its vocabulary, naming it; drop and retry.
+            const unknown = /no entry for codepoint (\\d+)/.exec(String(error));
+            const skipped = unknown && text.replaceAll(String.fromCodePoint(Number(unknown[1])), " ");
+            // Kokoro refuses a stretch over its phoneme limit without splitting it itself.
+            const halves = /exceeds \\d+ symbols/.test(String(error)) && splitAtPunctuation(text);
+            if (skipped && skipped !== text) {
+              if (skipped.trim()) pending.unshift(skipped);
+            } else if (halves) pending.unshift(...halves);
+            else throw error;
           } finally {
-            stream.close();
+            stream?.close();
           }
         }
         if (encoder && !cancelled) chunk(encoder.flush());
@@ -125,6 +149,7 @@ export async function loadLocalSynthesisModel(options: {
   let alive = true;
   let pending: ReturnType<typeof Promise.withResolvers<Reply>> | undefined;
   let receive: ((bytes: Uint8Array) => void) | undefined;
+  let receivePcm: ((pcm: Int16Array, rate: number) => void) | undefined;
   const exited = Promise.withResolvers<void>();
   const fail = (error: Error) => {
     alive = false;
@@ -144,6 +169,16 @@ export async function loadLocalSynthesisModel(options: {
     if (typeof message !== "object" || message === null || !("type" in message)) return;
     if (message.type === "t3-synthesis-chunk") {
       if ("bytes" in message && message.bytes instanceof Uint8Array) receive?.(message.bytes);
+      return;
+    }
+    if (message.type === "t3-synthesis-pcm") {
+      if (
+        "pcm" in message &&
+        message.pcm instanceof Int16Array &&
+        "rate" in message &&
+        typeof message.rate === "number"
+      )
+        receivePcm?.(message.pcm, message.rate);
       return;
     }
     if (message.type !== "t3-synthesis-reply") return;
@@ -197,13 +232,22 @@ export async function loadLocalSynthesisModel(options: {
     get alive() {
       return alive;
     },
-    /** Delivers MP3 as each text chunk is synthesized; resolves once the stream ends or is cancelled. */
-    stream: async (request: AudioCppSynthesisRequest, onAudio: (bytes: Uint8Array) => void) => {
+    /**
+     * Delivers MP3 as each text chunk is synthesized, and the mono PCM each part was encoded
+     * from; resolves once the stream ends or is cancelled.
+     */
+    stream: async (
+      request: AudioCppSynthesisRequest,
+      onAudio: (bytes: Uint8Array) => void,
+      onPcm?: (pcm: Int16Array, rate: number) => void,
+    ) => {
       receive = onAudio;
+      receivePcm = onPcm;
       try {
         await send({ kind: "synthesize", request });
       } finally {
         receive = undefined;
+        receivePcm = undefined;
       }
     },
     /** Stops after the text chunk in progress; the pending `stream` call then resolves. */

@@ -1,7 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useGT } from "gt-react";
-import { readAloudButtonMode } from "@t3tools/client-runtime/read-aloud";
-import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
+import { Volume2Icon } from "lucide-react";
 import { useClientSettings } from "../../hooks/useSettings";
 import { readAloudController, warmReadAloud } from "../../speech/readAloud";
 import { Button } from "../ui/button";
@@ -25,59 +24,43 @@ export function ReadAloudButton({ id, text }: { id: string; text: string }) {
   useEffect(() => warmReadAloud(settings), [settings]);
   const gt = useGT();
   if (settings.provider === "off") return null;
-  const { action, stoppable } = readAloudButtonMode(state, id);
-  const label = {
-    read: gt("Read aloud"),
-    cancel: gt("Cancel speech generation"),
-    pause: gt("Pause reading"),
-    resume: gt("Resume reading"),
-  }[action];
-  const Icon = { read: Volume2Icon, cancel: SquareIcon, pause: PauseIcon, resume: PlayIcon }[
-    action
-  ];
-  const stopLabel = gt("Stop reading");
+  const active = state.id === id;
+  const stoppable = active && (state.status === "playing" || state.status === "loading");
+  const reading = stoppable || (active && state.status === "paused");
+  const label = stoppable
+    ? gt("Stop reading")
+    : active && state.status === "paused"
+      ? gt("Resume reading")
+      : gt("Read aloud");
   return (
-    <>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost-muted"
-              aria-label={label}
-              onClick={async () => {
-                if (action === "cancel") return readAloudController.stop();
-                if (action === "pause") return readAloudController.pause();
-                if (action === "resume") await readAloudController.resume();
-                else await readAloudController.start(id, text, settings);
-                toastReadAloudError(id, gt("Could not read aloud"));
-              }}
-            >
-              <Icon className="size-3" />
-            </Button>
-          }
-        />
-        <TooltipPopup>{state.id === id && state.error ? state.error : label}</TooltipPopup>
-      </Tooltip>
-      {stoppable && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost-muted"
-                aria-label={stopLabel}
-                onClick={() => readAloudController.stop()}
-              >
-                <SquareIcon className="size-3" />
-              </Button>
-            }
-          />
-          <TooltipPopup>{stopLabel}</TooltipPopup>
-        </Tooltip>
-      )}
-    </>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            // The player above the composer shows what is being read; this only marks which reply.
+            variant={reading ? "ghost" : "ghost-muted"}
+            aria-label={label}
+            aria-pressed={reading}
+            onClick={async () => {
+              if (stoppable) return readAloudController.stop();
+              if (active && state.status === "paused") await readAloudController.resume();
+              else await readAloudController.start(id, text, settings);
+              toastReadAloudError(id, gt("Could not read aloud"));
+            }}
+          >
+            <Volume2Icon className="size-3" />
+          </Button>
+        }
+      />
+      <TooltipPopup>
+        {active && state.status === "loading"
+          ? gt("Cancel speech generation")
+          : active && state.error
+            ? state.error
+            : label}
+      </TooltipPopup>
+    </Tooltip>
   );
 }

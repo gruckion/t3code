@@ -4,7 +4,6 @@ import {
   createReadAloudController,
   createReadAloudWarmup,
   createTimedWords,
-  readAloudButtonMode,
   type SpeechPlayback,
   type SpokenWord,
 } from "./readAloud.ts";
@@ -222,7 +221,7 @@ it("warms each local model once per interval, and again after a failed request",
   const local = { ...DEFAULT_READ_ALOUD_SETTINGS, provider: "local" as const, environmentId };
   warmup(local);
   warmup(local);
-  warmup({ ...local, provider: "openai" });
+  warmup({ ...local, provider: "xai" });
   warmup({ ...local, environmentId: null });
   expect(warm.mock.calls).toEqual([[environmentId, local.model]]);
   now = 4 * 60_000;
@@ -338,7 +337,52 @@ it("starts at the block a user picks, keeps its markdown offsets, and ignores a 
   expect(controller.jump("1", 0)).toBeNull();
 });
 
-it("follows provider word timings on the audio clock and estimates them when there are none", async () => {
+it("seeks to a picked word in the audio when its time is known, else reads from that word", async () => {
+  const markdown = "First paragraph here.\n\nSecond **bold** one.";
+  const texts: string[] = [];
+  const seeks: number[] = [];
+  const speeds: number[] = [];
+  let seekable = true;
+  const prepared: Array<ReturnType<typeof deferred<void>>> = [];
+  const controller = createReadAloudController(async (text) => {
+    texts.push(text);
+    const finished = deferred<void>();
+    prepared.push(finished);
+    return {
+      play: async () => {},
+      pause: () => {},
+      stop: () => finished.resolve(),
+      finished: finished.promise,
+      seek: (at) => {
+        seeks.push(at);
+        return seekable;
+      },
+      setSpeed: (speed) => speeds.push(speed),
+    };
+  });
+  const settings = { ...DEFAULT_READ_ALOUD_SETTINGS, provider: "local" as const };
+  void controller.start("1", markdown, settings);
+  await vi.waitFor(() => expect(controller.getSnapshot().status).toBe("playing"));
+  expect(controller.seek("2", 0)).toBeNull();
+
+  // "bold" sits at offset 29 of the spoken text "First paragraph here.\nSecond bold one."
+  await controller.seek("1", markdown.indexOf("old"));
+  expect(seeks).toEqual(["First paragraph here.\nSecond ".length]);
+  expect(texts).toHaveLength(1);
+
+  // A word whose time has not arrived is read from instead, from the word itself, not its block.
+  seekable = false;
+  void controller.seek("1", markdown.indexOf("one"));
+  await vi.waitFor(() => expect(texts).toEqual([texts[0], "one."]));
+
+  // Speed changes go to the player, and later readings keep them.
+  await controller.setSpeed(1.25);
+  expect(speeds).toEqual([1.25]);
+  controller.stop();
+  expect(controller.setSpeed(1.5)).toBeNull();
+});
+
+it("follows the environment's word timings on the audio clock and estimates them when there are none", async () => {
   vi.useFakeTimers();
   try {
     let seconds = 0;
@@ -349,7 +393,6 @@ it("follows provider word timings on the audio clock and estimates them when the
     ];
     const provider = createTimedWords({
       text: "one two",
-      wordTimings: "provider",
       load: async () => ({ words, done: true }),
       clock,
     });
@@ -358,20 +401,25 @@ it("follows provider word timings on the audio clock and estimates them when the
     await vi.advanceTimersByTimeAsync(0);
     expect(heard).toEqual([{ start: 0, end: 3 }]);
     seconds = 1;
-    // At 2× the next word starts after half a second of wall time.
-    await vi.advanceTimersByTimeAsync(499);
+    // At 2× the next word starts after half a second of wall time, less a little slack.
+    await vi.advanceTimersByTimeAsync(469);
     expect(heard).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(heard).toEqual([
       { start: 0, end: 3 },
       { start: 4, end: 7 },
     ]);
+    // A seek that lands a few milliseconds short of a word, as MP3 seeks do, is on that word.
+    seconds = 0.5;
+    provider.refresh();
+    seconds = 0.98;
+    provider.refresh();
+    expect(heard.at(-1)).toEqual({ start: 4, end: 7 });
     provider.stop();
 
     seconds = 2.5;
     const estimated = createTimedWords({
       text: "one two three.",
-      wordTimings: "estimated",
       load: async () => ({ words: [], done: true, durationSeconds: 3 }),
       clock,
     });
@@ -409,36 +457,6 @@ it("sends the blocks it reads, so a jump requests the same blocks a full read di
   expect(pieces(calls[1])).toEqual(pieces(calls[0])?.slice(1));
 });
 
-it("pauses while a reply plays, resumes it, cancels only the first speech generation, and offers Stop", () => {
-  const mode = (state: Parameters<typeof readAloudButtonMode>[0]) =>
-    readAloudButtonMode(state, "1");
-  expect(mode({ id: null, status: "idle" })).toEqual({ action: "read", stoppable: false });
-  expect(mode({ id: "2", status: "playing", started: true })).toEqual({
-    action: "read",
-    stoppable: false,
-  });
-  expect(mode({ id: "1", status: "error", error: "offline" })).toEqual({
-    action: "read",
-    stoppable: false,
-  });
-  expect(mode({ id: "1", status: "loading", started: false })).toEqual({
-    action: "cancel",
-    stoppable: false,
-  });
-  expect(mode({ id: "1", status: "playing", started: true })).toEqual({
-    action: "pause",
-    stoppable: true,
-  });
-  expect(mode({ id: "1", status: "loading", started: true })).toEqual({
-    action: "pause",
-    stoppable: true,
-  });
-  expect(mode({ id: "1", status: "paused", started: false })).toEqual({
-    action: "resume",
-    stoppable: true,
-  });
-});
-
 it("keeps the spoken word highlighted while paused and goes on from it after resume", async () => {
   const markdown = "One two three four.";
   const playing = deferred<void>();
@@ -467,7 +485,7 @@ it("keeps the spoken word highlighted while paused and goes on from it after res
   });
   await playing.promise;
   unsubscribe();
-  expect(controller.getSnapshot()).toEqual({ id: "1", status: "playing", started: true });
+  expect(controller.getSnapshot()).toEqual({ id: "1", status: "playing" });
   const two = markdown.indexOf("two");
   emit?.({ start: two, end: two + 3 });
   controller.pause();
@@ -476,7 +494,7 @@ it("keeps the spoken word highlighted while paused and goes on from it after res
   expect(controller.getHighlight()?.word).toMatchObject({ start: two, end: two + 3 });
   await controller.resume();
   expect(play).toHaveBeenCalledTimes(2);
-  expect(controller.getSnapshot()).toEqual({ id: "1", status: "playing", started: true });
+  expect(controller.getSnapshot()).toEqual({ id: "1", status: "playing" });
   const three = markdown.indexOf("three");
   emit?.({ start: three, end: three + 5 });
   expect(controller.getHighlight()?.word).toMatchObject({ start: three, end: three + 5 });
@@ -484,42 +502,4 @@ it("keeps the spoken word highlighted while paused and goes on from it after res
   await run;
   expect(controller.getSnapshot()).toEqual({ id: null, status: "idle" });
   expect(controller.getHighlight()).toBeNull();
-});
-
-it("marks the wait for a later chunk as started, so it can be paused instead of cancelled", async () => {
-  const started = deferred<void>();
-  const finished = deferred<void>();
-  const nextPrepared = deferred<void>();
-  const next = deferred<SpeechPlayback>();
-  const prepare = vi.fn(async (): Promise<SpeechPlayback> => {
-    if (prepare.mock.calls.length > 1) {
-      nextPrepared.resolve();
-      return next.promise;
-    }
-    return {
-      play: async () => started.resolve(),
-      pause: () => {},
-      stop: () => {},
-      finished: finished.promise,
-    };
-  });
-  const controller = createReadAloudController(prepare);
-  const run = controller.start("1", "word ".repeat(1000), {
-    ...DEFAULT_READ_ALOUD_SETTINGS,
-    provider: "system",
-  });
-  expect(controller.getSnapshot()).toEqual({ id: "1", status: "loading", started: false });
-  await started.promise;
-  finished.resolve();
-  await nextPrepared.promise;
-  expect(controller.getSnapshot()).toEqual({ id: "1", status: "loading", started: true });
-  expect(readAloudButtonMode(controller.getSnapshot(), "1").action).toBe("pause");
-  controller.stop();
-  next.resolve({
-    play: async () => {},
-    pause: () => {},
-    stop: () => {},
-    finished: Promise.resolve(),
-  });
-  await run;
 });

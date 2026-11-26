@@ -66,7 +66,6 @@
   "2f6e4f7cd364da73": "Expected",
   "9d11c93d4035de3e": "Happened",
   "c87d0595693704f9": "Did instead",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} characters",
   "f5114fb9c40fd929": "You",
   "cd03eb1b84271c02": "Agent",
   "bfe1a60f3f9c60fb": "Turn {turn} · {what}",
@@ -1297,7 +1296,6 @@
   "c13753167634f7aa": "Read file",
   "5ce648cd03020fd9": "Read {path} +{count} more",
   "5d6c2898401c94e6": "Read {path}",
-  "612170d804b03320": "{count, plural, one {{count} malformed or inconsistent usage record(s) were skipped; usage may be incomplete.} other {{count} malformed or inconsistent usage record(s) were skipped; usage may be incomplete.}}",
   "ee448ceb6820ce2f": "{environment} runs an older server version and is excluded from totals.",
   "732708950237004e": "This client is older than the server on {environment}; its usage is excluded from totals.",
   "9758c2ede06aa19b": "{hour} today",
@@ -3290,10 +3288,7 @@
   "40b518245fdaff8f": "Checking API keys…",
   "8ed10b4eeb4108de": "Audio is sent through {environment} using its API key.",
   "f333fe5e33af7bef": "Update the environment to use this provider",
-  "b986fae0b620d8e4": "{model} · Tap to change model or key",
-  "a1ac4180684d6eff": "{model} · Tap to change model",
   "974c12c85fd4d19e": "Tap to manage key",
-  "7ea06a082b99bb8f": "API key saved · choose a model to use it",
   "560ac67ee42ea012": "API key saved",
   "c8dec17d48f0c93a": "Add an API key to use this provider",
   "f30561e30ee8a64d": "Ask an environment administrator to add an API key",
@@ -3302,7 +3297,6 @@
   "0c5f24ba4be2d212": "Use {provider}",
   "5e7930d71a5c7f7c": "Enter a valid API key.",
   "7d8a206fd3f67264": "Uses the API key saved on this environment. The model choice applies only to this device.",
-  "0a9e4d44c145cd07": "Anyone with dictation access to {environment} can bill this key.",
   "df7658221f3e8971": "Updates the {company} key on {environment}. Your dictation destination stays the same.",
   "c58d3c64027807c6": "Could not load models · Retry",
   "dddfe3741f379a11": "Loading transcription models…",
@@ -5195,7 +5189,6 @@
   "0b363b02a7e17bcb": "Raw token cost",
   "ea4beda46b22b8b0": "Processed tokens",
   "212d974007cacf3f": "* if billed at full API rate",
-  "82bc7f1cc5a039fc": "{count, plural, other {Across {sessions} sessions}}",
   "2a57181a9d128463": "{share} of cost · {tokens} tokens",
   "d8a6a99fbdda0d3e": "{share} of tokens · {cost}",
   "19a3f4f2ba09e787": "Totals",
@@ -5675,5 +5668,104 @@
   "0eceb5780908eb6c": "Read aloud",
   "1405f6ff92c1041a": "Could not change the model. Try again.",
   "81923647f1ef9740": "Cancel speech generation",
-  "e5ad64bb69db1045": "Pause reading"
+  "e5ad64bb69db1045": "Pause reading",
+  "bfad234f016cfa3f": "Why, in a sentence. It goes with whichever answer you pick.",
+  "99451a5d2d40440f": "Withdrawn by {by}.",
+  "1b978e981c03ece2": "OpenRouter didn’t accept this code. Sign in again.",
+  "0af6d5ffd5166214": "{count, plural, one {queued, {count} ahead} other {queued, {count} ahead}}",
+  "3759768c5d342c22": [
+    "answered",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "1ca2facc399b6d4c": "Finish",
+  "04ac2410d2cc0666": "This project's Claude settings turn auto mode off.",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} character} other {{speaker} · {count} characters}}",
+  "1235caa9d67f09c6": "Multilingual word timing",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " needs a reason."
+  ],
+  "45340a7dc1f89d51": "{count, plural, one {Across {sessions} session} other {Across {sessions} sessions}}",
+  "0f93532dd76391fc": "You answered {choice}",
+  "8afa4fbe16f95bcf": [
+    "by ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "1a1beecff68a6e61": "Verify Google account",
+  "235902a19e95833b": [
+    "by you,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "796ab9d04e7b4f96": "This OpenRouter sign-in expired. Sign in again.",
+  "a3c43735e1a81498": "Reason for {title}",
+  "0d5aac55ed15a52c": "Couldn’t reach OpenRouter. Try again.",
+  "dc28e2793b510896": "Preparing speech",
+  "8a0a725cd4a505ce": "Playback speed",
+  "98f5e5fa1c6b0c62": "Finish signing in on OpenRouter, then come back here.",
+  "81d703184fe5112e": "Run this repository's push hooks?",
+  "7e1fd2eb570a372b": "{who} answered {choice}",
+  "796b81c4875c4feb": [
+    "The ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " app needs a newer ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " server on this environment. Update the server to use it."
+  ],
+  "8ccf7e0def66d339": "Your Claude settings turn auto mode off.",
+  "2cf284a7b130b411": "Sign in again",
+  "b1404122fa62a7d8": "OpenRouter didn’t accept this sign-in. Sign in again.",
+  "20a054556a7395b2": "Sign in with OpenRouter",
+  "a092ae05913a1f09": "Playback speed: {speed}×",
+  "efbeb3993ee2c3f5": "Queued for {pool}",
+  "53dac468c9738c4e": "Jump to current",
+  "ade585910165bb52": "Configured hook",
+  "34065b700e23a8ae": "Couldn’t start signing in with OpenRouter. Try again.",
+  "7150557773b3818b": "Queued",
+  "69150fe436b3a0c2": "{count, plural, one {{count} malformed or inconsistent usage record was skipped; usage may be incomplete.} other {{count} malformed or inconsistent usage records were skipped; usage may be incomplete.}}",
+  "6f321f153b8711bb": "Choose an option",
+  "13b14784f8707ddd": "0 bytes",
+  "069e0382ff2496f5": "Your organization's Claude settings turn auto mode off.",
+  "027b0d65c7a67af6": "Hook file",
+  "3ee30a50b70fffab": "Withdrawn by {by}: {reason}",
+  "7e27789f5d58960e": "Claude's settings turn auto mode off.",
+  "1b799ebfa94c2408": "Push hooks approval",
+  "0398ca6c1d24b92d": "queued, next in line",
+  "bc5e8f45269a432e": "or paste an API key",
+  "449e39e08a0879ce": "Code from OpenRouter",
+  "201490988858b511": "withdrawn by {by}",
+  "46d614fa7b4bf1e5": "Workflow runs",
+  "1c68db6bfe3f1a9e": "Highlight the spoken word in 25 languages. Downloads a 740 MB model instead of a 135 MB one."
 }

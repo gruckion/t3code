@@ -67,7 +67,6 @@
   "2f6e4f7cd364da73": "Resultado esperado",
   "9d11c93d4035de3e": "Lo que ocurrió",
   "c87d0595693704f9": "Alternativa utilizada",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} caracteres",
   "f5114fb9c40fd929": "Tú",
   "cd03eb1b84271c02": "Agente",
   "bfe1a60f3f9c60fb": "Turno {turn} · {what}",
@@ -1301,7 +1300,6 @@
   "c13753167634f7aa": "Archivo leído",
   "5ce648cd03020fd9": "Leyó {path} y {count} más",
   "5d6c2898401c94e6": "Leyó {path}",
-  "612170d804b03320": "{count, plural, one {Se omitió {count} registro de uso mal formado o incoherente; el uso puede estar incompleto.} other {Se omitieron {count} registros de uso mal formados o incoherentes; el uso puede estar incompleto.}}",
   "ee448ceb6820ce2f": "{environment} ejecuta una versión anterior del servidor y se excluye de los totales.",
   "732708950237004e": "Este cliente es más antiguo que el servidor de {environment}; su uso se excluye de los totales.",
   "9758c2ede06aa19b": "Hoy a las {hour}",
@@ -1861,7 +1859,6 @@
   "67f5b13c3c7bcd40": "Compartir con un invitado",
   "82da5b8b340217ac": "Reiniciar sesión del agente",
   "963d099509eabcd6": "La sesión del agente se reiniciará",
-  "1d384d4fe7888a09": "Tu próximo mensaje inicia una sesión nueva.",
   "e4b61c891fed297e": "Ir al archivo",
   "d2ccdb8cd3297212": "Añadir proyecto",
   "594bcbef04093f72": "Abrir carpeta de WSL",
@@ -4097,7 +4094,7 @@
   "7635dd64bbbe10ec": "Abrir automatización",
   "0eceb5780908eb6c": "Leer en voz alta",
   "81923647f1ef9740": "Cancelar la generación de voz",
-  "e5ad64bb69db1045": "Pausar lectura",
+  "e5ad64bb69db1045": "Pausar la lectura",
   "e3c3d4bcfa9727b9": "Reanudar lectura",
   "154bec57dbece73c": "Dejar de leer",
   "6327e4ffa0f2366d": "Pull requests no disponibles",
@@ -4942,8 +4939,6 @@
   "3f5c37167aa5034f": "El almacenamiento del navegador rechazó la escritura, así que el cuadro de mensaje se quedó como estaba. Libera datos del sitio y vuelve a intentarlo.",
   "41ba6c0b5c5e8b22": "El prompt del stash no sobrevivirá a una recarga",
   "94d7f150b3f7b291": "El almacenamiento del navegador no está disponible, así que este stash solo se guarda en memoria durante esta sesión.",
-  "f421c24666cd8c71": "Se descartó el prompt más antiguo del stash",
-  "1123f816ea2a6e3e": "El stash admite {max} prompts; se quitó el más antiguo para hacer sitio.",
   "c3a8f9b1b2e7d588": "Las imágenes del stash no se guardaron",
   "fc3feba263971bce": "El prompt se guardó en el stash, pero el almacenamiento del navegador rechazó sus imágenes. Faltarán si recargas.",
   "9e36559d0fa0cca8": "Las imágenes del stash no se adjuntaron",
@@ -5389,13 +5384,11 @@
   "9edae9f03274cab1": "No se detectó compatibilidad con {platform}.",
   "9ceeca01c1c48b48": "No se mostraron dispositivos {platform} porque la detección de dispositivos informó de un problema.",
   "6cfe3b4931af6f8a": "Xcode está instalado, pero no hay ningún simulador de iOS disponible. Instala un runtime en Ajustes de Xcode → Components.",
-  "22750cc2c6dc56c4": "El SDK de Android está instalado, pero no existe ningún dispositivo virtual. Crea uno en Android Studio → Device Manager.",
   "3e436963e11ea3bc": "{host} inicia simuladores de iOS en la nube con Expo Simulators.",
   "1a6f2df32b8307a2": "{host} inicia emuladores de Android en la nube con Expo Simulators.",
   "600c3e7ff64413cf": "Xcode y el simulador de iOS están disponibles en {host}.",
   "64142a49e6bf92e7": "Xcode y el simulador de iOS están disponibles.",
   "2fbdc66961a873a6": "El SDK de Android y el emulador están disponibles en {host}.",
-  "41c86e1a0fc8f0d2": "El SDK de Android y el emulador están disponibles.",
   "7ff8efdb29b93b6d": "Configurar dispositivos",
   "a29a9a0c5fbba6b0": "Revisa lo que se ejecuta en este entorno antes de usar simuladores y emuladores.",
   "13c051bd01d4daf3": "Simuladores",
@@ -5589,7 +5582,6 @@
     },
     "."
   ],
-  "774654575f014b55": "Guárdalo para abrirlo en una app compatible con este formato de archivo.",
   "46f943a30e259620": "Audio no disponible. Abrir {name}",
   "e2cf6b944d1d095d": "Audio no disponible. Reintentar {name}",
   "f08fb460ad4617d6": "Cargando {name}",
@@ -7963,7 +7955,6 @@
   "9a284b5893dc04a2": "Modelo de OpenRouter",
   "c8361c16c47d5fb5": "Buscar modelos de transcripción",
   "d72eccdd92d4f989": "No se pudo guardar este cambio. Comprueba tu conexión y vuelve a intentarlo.",
-  "ef5fef499da688e8": "Reemplazar clave de API",
   "cad38c8893ab98e4": "Clave de API",
   "42ec8bbd6819af00": "Clave de API de {company}",
   "03d751a890780a70": "Referencia de la clave de API de {company}",
@@ -7971,9 +7962,7 @@
   "7aa0d5470ed46175": "Introduce una clave de API, no una URL ni una referencia a un secreto.",
   "dad7aceef19f0f5b": "Actualizar la clave mantiene el dictado activado.",
   "015e394f14d5ede0": "Déjalo en blanco para conservar la clave guardada.",
-  "0a9e4d44c145cd07": "Cualquiera con acceso al dictado en {environment} puede cargar costes a esta clave.",
   "55803224ee096dc0": "¿Quitar la clave de {company}?",
-  "0a7813c7df04ffe9": "Gestionar el dictado con OpenRouter",
   "9996968084688efe": "Gestionar la clave de {company}",
   "bf6a4f30c36e0a87": "¿Usar {name} para el dictado?",
   "710bec893f7881d1": "Todos los que usan {name} para el dictado en {environment} perderán el acceso.",
@@ -8855,7 +8844,6 @@
   "a9cdd8c7073be920": "Paleta de comandos: alternar",
   "4e0943e8c7a465d1": "Selector de archivos: alternar",
   "df5fdcdf26a6b52a": "Búsqueda en el proyecto: alternar",
-  "a8ff6d33b060736f": "Uso: abrir",
   "a513d51b71b95674": "Tema: seleccionar",
   "1ffd8427452372e1": "Apariencia: alternar",
   "3a3bb4a7551a87cc": "Editor de temas: alternar",
@@ -9523,7 +9511,6 @@
   "33fbce50a4ea67e6": "Argumentos de CLI adicionales que se pasan al iniciar la sesión.",
   "abdee70d90cb26a3": "Compacta tras 100 000 a 1 000 000 de tokens. Déjalo vacío para usar el valor predeterminado de Claude.",
   "f907b2466603538e": "Cuándo compactar un hilo inactivo de más de 200 000 tokens: cuando vuelvas, justo antes de que caduque su caché de prompts, o nunca. Sustituye el valor predeterminado de Proveedores > Avanzado.",
-  "484df18e29b21047": "Las cuentas de Google usan tu suscripción; las claves de API y Agent Platform facturan el uso.",
   "931df01584748bf9": "Clave exprés de Gemini o Vertex AI. Se guarda por separado en el host.",
   "8bf0f6ed8dd4b77e": "Obligatorio para Gemini Enterprise. Agent Platform lo usa cuando no hay ninguna clave de API.",
   "7c735c8fbd3fb6e3": "Región de Gemini Enterprise o Agent Platform.",
@@ -9685,10 +9672,7 @@
   "3b548795318c1063": "Narration API key",
   "6f04398aad1ae5ad": "The key for the narration model.",
   "65a238ad6bebf802": "¿Leer las respuestas en voz alta con {name}?",
-  "bfbaa4965c146e7c": "Todas las personas que usan {company} para dictado o lectura en voz alta en {environment} perderán el acceso.",
-  "b9e06e668bd9bff0": "Las respuestas que reproduces se envían a {company} a través de {environment}, que paga con su clave de API. La clave se comparte con el dictado.",
   "09f85302ef58020c": "Actualizar la clave mantiene activada la lectura en voz alta.",
-  "6e58953ca9c7fad5": "Cualquiera con acceso a {environment} puede cargar costes a esta clave.",
   "cf0740520675dcb9": [
     "Conéctate a ",
     {
@@ -11274,7 +11258,6 @@
   "4889f7885396c26b": "Worktrees",
   "2d96fe39105aae8f": "Registros rotados",
   "1214c77f4bf1ee81": "Artefactos del navegador",
-  "9831e9c703b3bdd0": "{omitted, plural, one {{environment}: {count} resultado más.} other {{environment}: {count} resultados más.}}",
   "c8192b219451a0d0": "{removed} quitados, {kept} conservados, {failed} fallidos",
   "cbd8bf91a856906a": "{removed} quitados, {kept} conservados",
   "754564dc0b82aff7": "{count, plural, one {Última ejecución {when}. {bytes} recuperados. No se pudo quitar {count} elemento.} other {Última ejecución {when}. {bytes} recuperados. No se pudieron quitar {count} elementos.}}",
@@ -11792,7 +11775,6 @@
   "4b2f68f90eb004f6": "No se reconoció voz. Inténtalo de nuevo.",
   "cc04b357924afb36": "Cerrar prueba del modelo",
   "25607ff5f39ac0ac": "Apple Speech (no disponible)",
-  "97ce6c61f0039edd": "Gestionar OpenRouter",
   "ca50ce902d534122": "Gestionar clave",
   "4993d154ece9c92f": "La entrada de voz usa el primer micrófono conectado de esta lista.",
   "501bce0d4bd2b113": "Atajo de dictado",
@@ -12021,7 +12003,6 @@
   "9d834d178130180e": "beta alfa simlock callstack simulador emulador ios android grupo préstamo gateway",
   "bcb520297a9ae143": "beta worktree rápido checkout clonar apfs copy-on-write caché macos velocidad",
   "4c83ac419da342bd": "enviar audio del micrófono dictado destino voz habla stt transcripción entorno máquina consentimiento privacidad nube OpenAI Grok OpenRouter",
-  "3985d8550c7bc219": "tts texto a voz hablar leer en voz alta voz reproducción OpenAI Grok OpenRouter ElevenLabs",
   "f9c000e92379d027": "micrófono entrada audio dispositivo orden prioridad preferido",
   "22811f405e0b4b28": "voz habla teclado atajo mantener alternar automático",
   "e27bccf50397d9fe": "voz habla traducir inglés detectar automáticamente",
@@ -12458,7 +12439,6 @@
   "d2d071e45a2d6b89": "Selecciona un entorno para ver los límites.",
   "c9180daea905a0a6": "Selecciona un entorno para ver el uso.",
   "f0297ec79e896a13": "{environment}: {error}",
-  "6dcbf651d51d4023": "{count, plural, one {{formatted} sesión} other {{formatted} sesiones}}",
   "b01bf98dd90ee819": "Estimación de API",
   "bab34b28e9ee8e88": "Detalles del uso sin precio",
   "61571f4542da9903": "{count, plural, one {{formatted} sesión} other {{formatted} sesiones}}",
@@ -12633,7 +12613,6 @@
   "7755500a4cde5066": "Cerrar el panel",
   "b8dcbc93a2ca1861": "Esta ejecución ya no lo incluye.",
   "115c69de3202f664": "Abrir",
-  "644eafa9048b62df": "{count, plural, =1 {1.er intento} =2 {2.º intento} =3 {3.er intento} other {{count}.º intento}}",
   "e39f89c909df4db0": "No se pudo reanudar la ejecución",
   "865f034346b82f47": "¿Cancelar {title}? Sus agentes se detienen y la ejecución no se podrá reanudar.",
   "6bc75632fd9c9136": "No se pudo cancelar la ejecución",
@@ -12957,5 +12936,237 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
+  "53dac468c9738c4e": "Ir a la posición actual",
+  "0d5aac55ed15a52c": "No se pudo contactar con OpenRouter. Inténtalo de nuevo.",
+  "06d3fe3e6b255d15": [
+    "+",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " más"
+  ],
+  "1b978e981c03ece2": "OpenRouter no aceptó este código. Vuelve a iniciar sesión.",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} carácter} other {{speaker} · {count} caracteres}}",
+  "3759768c5d342c22": [
+    "respondida",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "796b81c4875c4feb": [
+    "La app ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " necesita un servidor de ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " más reciente en este entorno. Actualiza el servidor para usarla."
+  ],
+  "49be26a27dcb30e5": "en cola",
+  "d5a4a3f4c97e473c": "Leyendo en voz alta",
+  "90dfebe26eb86b2d": "Opciones de selección de la página",
+  "7150557773b3818b": "En cola",
+  "796ab9d04e7b4f96": "Este inicio de sesión de OpenRouter caducó. Vuelve a iniciar sesión.",
+  "91aadfc843c600de": "Verificar cuenta de Google",
+  "5b9fda36b610d25c": "Detener",
+  "0af6d5ffd5166214": "{count, plural, one {en cola, {count} delante} other {en cola, {count} delante}}",
+  "8ba6febaabeb6f14": "{terminalLabel} líneas {lineStart}–{lineEnd}",
+  "d3170aa2bb08efbd": "Guárdalo para abrirlo en una app compatible con este formato de archivo.",
+  "449e39e08a0879ce": "Código de OpenRouter",
+  "71ed7c0da0b93c77": "Tu próximo mensaje reinicia el agente. Esta conversación se conserva.",
+  "d9e33a2a8d404a96": "{omitted, plural, one {{environment}: {count} resultado más.} other {{environment}: {count} resultados más.}}",
+  "4e96712d839ccbff": "{who} dijo {choice}",
+  "069e0382ff2496f5": "La configuración de Claude de tu organización desactiva el modo automático.",
+  "34065b700e23a8ae": "No se pudo iniciar sesión con OpenRouter. Inténtalo de nuevo.",
+  "1235caa9d67f09c6": "Sincronización de palabras multilingüe",
+  "0e34c3076c08feb2": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": [
+        "↻ +",
+        {
+          "i": 2,
+          "k": "_gt_value_2",
+          "v": "v"
+        },
+        "%"
+      ]
+    },
+    " ",
+    "en ",
+    {
+      "i": 3,
+      "k": "_gt_value_3",
+      "v": "v"
+    }
+  ],
+  "efbeb3993ee2c3f5": "En cola para {pool}",
+  "dbc3908dc1f730ab": "El SDK de Android está instalado, pero no se encontró ningún dispositivo Android. Conecta un teléfono con la depuración USB activada o crea un dispositivo virtual en Android Studio → Device Manager.",
+  "7e27789f5d58960e": "La configuración de Claude desactiva el modo automático.",
+  "13682ea76b1efa5d": "El modelo de OpenRouter que transcribe tu dictado.",
+  "b1404122fa62a7d8": "OpenRouter no aceptó este inicio de sesión. Vuelve a iniciar sesión.",
+  "0ca6fd2b8fcab2c3": "Uso: Mostrar u ocultar",
+  "a2bbf464a3be4882": "{count, plural, =1 {1.er intento} =2 {2.º intento} =3 {3.er intento} other {{count}.º intento}}",
+  "800966eb58181745": "Comprobando qué idiomas admite el modelo…",
+  "57f3bffc6b444c3d": [
+    "Las respuestas que reproduces se envían a ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " a través de ",
+    {
+      "t": "strong",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ", que paga con su clave de API. La clave se comparte con el dictado."
+  ],
+  "98f5e5fa1c6b0c62": "Termina de iniciar sesión en OpenRouter y luego vuelve aquí.",
+  "1b799ebfa94c2408": "Aprobación de hooks de push",
+  "bc5e8f45269a432e": "o pega una clave de API",
+  "b362d4f1c293a461": "Modelo",
+  "2830c15ca3574a86": "Resalta la palabra pronunciada en 25 idiomas, no solo en inglés. Descarga un modelo de 740 MB en el entorno seleccionado en lugar de uno de 135 MB.",
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " necesita un motivo."
+  ],
+  "0398ca6c1d24b92d": "en cola, el siguiente",
+  "236b7b3f5ff18a4d": "tts texto a voz hablar leer en voz alta voz reproducción Grok OpenRouter ElevenLabs",
+  "ac1541a6ce6ec81e": "Sincronizar palabras en 25 idiomas",
+  "2d99f80191b88ee4": "El SDK de Android está disponible.",
+  "3ee30a50b70fffab": "Retirada por {by}: {reason}",
+  "2cf284a7b130b411": "Volver a iniciar sesión",
+  "81d703184fe5112e": "¿Ejecutar los hooks de push de este repositorio?",
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " dijo",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
+  "1af8d12ac21cb183": "El stash admite {max} prompts. Restaura o elimina uno para hacer sitio; el campo de texto se dejó como estaba.",
+  "92e129bf413a1220": "retirada",
+  "d8e91bcf106d3bca": "Preparando la lectura",
+  "a4579e548b768663": "Mostrar barra lateral",
+  "99451a5d2d40440f": "Retirada por {by}.",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " dijo",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "9610fb9f4d9849ec": "Cuenta de Google y Gemini Enterprise usan tu plan actual. Clave de API de Gemini y Agent Platform cobran por uso en tu clave o proyecto de Google Cloud.",
+  "201490988858b511": "retirada por {by}",
+  "1ca2facc399b6d4c": "Finalizar",
+  "04ac2410d2cc0666": "La configuración de Claude de este proyecto desactiva el modo automático.",
+  "381ceed77cb8b2b3": "Detener {name}",
+  "9bb4c18ca561c5c7": [
+    "Todas las personas que usan ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " para dictado o lectura en voz alta en ",
+    {
+      "t": "strong",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    " perderán el acceso."
+  ],
+  "69150fe436b3a0c2": "{count, plural, one {Se omitió {count} registro de uso mal formado o incoherente; el uso puede estar incompleto.} other {Se omitieron {count} registros de uso mal formados o incoherentes; el uso puede estar incompleto.}}",
+  "410dded6e21c280d": "El stash está lleno",
+  "1730c80a86d1ceb9": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": [
+        "a través de ",
+        {
+          "i": 3,
+          "k": "_gt_value_3",
+          "v": "v"
+        }
+      ]
+    }
+  ],
+  "8ccf7e0def66d339": "Tu configuración de Claude desactiva el modo automático.",
+  "ade585910165bb52": "Hook configurado",
+  "f3c70064a22a0c76": "{terminalLabel} línea {lineStart}",
+  "1d372f6d555dde3c": "Detener todos los dispositivos",
+  "f1b18820c0ab93ac": [
+    "+",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " más en Elementos vinculados"
+  ],
+  "20a054556a7395b2": "Iniciar sesión con OpenRouter",
+  "027b0d65c7a67af6": "Archivo de hook"
 }

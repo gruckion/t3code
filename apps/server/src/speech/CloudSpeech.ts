@@ -1,5 +1,6 @@
 import {
   SpeechSynthesisError,
+  type CloudSpeechSynthesisProvider,
   type SpeechSynthesisProvider,
   type SpeechSynthesisRequest,
   type SpeechSynthesisCatalog,
@@ -33,7 +34,7 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
-import { encodeMp3, MAX_SYNTHESIS_BYTES } from "./synthesisAudio.ts";
+import { isEncodableFormat, MAX_SYNTHESIS_BYTES, streamingMp3Encoder } from "./synthesisAudio.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
 import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -155,37 +156,8 @@ const sameCredential = Schema.toEquivalence(SettingsSecretValue);
 const OpenRouterCatalog = Schema.Struct({
   data: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.optionalKey(Schema.String) })),
 });
-const openAiSpeechModels = [
-  {
-    id: "gpt-4o-mini-tts",
-    name: "GPT-4o mini TTS",
-    voices: [
-      "alloy",
-      "ash",
-      "ballad",
-      "coral",
-      "echo",
-      "fable",
-      "nova",
-      "onyx",
-      "sage",
-      "shimmer",
-      "verse",
-      "marin",
-      "cedar",
-    ],
-  },
-  {
-    id: "tts-1",
-    name: "TTS-1",
-    voices: ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"],
-  },
-  {
-    id: "tts-1-hd",
-    name: "TTS-1 HD",
-    voices: ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"],
-  },
-] as const;
+
+const OPENROUTER_DEFAULT_SYNTHESIS_MODEL = "heygen/heygen-voice-1-turbo";
 
 function openRouterSpeechFormat(model: string) {
   return model.startsWith("google/gemini-") || model.startsWith("heygen/") ? "pcm" : "mp3";
@@ -226,14 +198,19 @@ type SynthesisBackend = {
   >;
 };
 
-/** Audio, or the words of the request text that the audio so far speaks. */
+/**
+ * MP3 audio, the words of the request text that the audio so far speaks, or the mono PCM that
+ * MP3 was encoded from, starting `startSeconds` into the stream, for timing words it lacks.
+ */
 export type SpeechSynthesisPart =
   | Uint8Array
-  | { readonly words: ReadonlyArray<SpeechSynthesisWord> };
+  | { readonly words: ReadonlyArray<SpeechSynthesisWord> }
+  | { readonly pcm: Int16Array; readonly rate: number; readonly startSeconds: number };
 
 // gpt-4o-mini-tts accepts 2,000 tokens, which Chinese or Japanese reaches near 2,000 characters,
 // and OpenRouter's Seed Audio accepts 3,000 characters. Pieces stream back to back, so small is cheap.
 const CLOUD_SYNTHESIS_TEXT_LIMIT = 1000;
+const XAI_SPEECH_RATE = 24_000;
 const SYNTHESIS_STALL_TIMEOUT = "30 seconds";
 
 function wave(samples: Float32Array) {
@@ -359,15 +336,25 @@ function joinBytes(chunks: ReadonlyArray<Uint8Array>) {
   return bytes;
 }
 
+function joinSamples(chunks: ReadonlyArray<Int16Array>) {
+  const samples = new Int16Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return samples;
+}
+
 export class CloudSpeech extends Context.Service<
   CloudSpeech,
   {
     readonly synthesisModels: (
-      provider: CloudSpeechProvider,
+      provider: CloudSpeechSynthesisProvider,
     ) => Effect.Effect<SpeechSynthesisCatalog, SpeechSynthesisError | ServerSettingsError>;
     /** MP3 that streams through as the provider produces it, with word timings where it has them. */
     readonly stream: (
-      provider: CloudSpeechProvider,
+      provider: CloudSpeechSynthesisProvider,
       request: SpeechSynthesisRequest,
     ) => Stream.Stream<SpeechSynthesisPart, SpeechSynthesisError | ServerSettingsError>;
     readonly configured: Effect.Effect<CloudSpeechKeys, ServerSettingsError>;
@@ -450,8 +437,7 @@ export const layer = Layer.effect(
       (exit) => (Exit.isSuccess(exit) ? "10 minutes" : 0),
     );
     const loadSynthesisModels = Effect.fn("CloudSpeech.synthesisModels")(
-      function* (provider: CloudSpeechProvider) {
-        if (provider === "openai") return { models: openAiSpeechModels };
+      function* (provider: CloudSpeechSynthesisProvider) {
         if (provider === "xai" || provider === "elevenlabs") {
           const source = (yield* credentials)[provider];
           const key = yield* resolveKey(
@@ -557,29 +543,6 @@ export const layer = Layer.effect(
       (exit) => (Exit.isSuccess(exit) ? "10 minutes" : 0),
     );
     const synthesisBackends = {
-      openai: {
-        catalog: {
-          defaultModel: openAiSpeechModels[0].id,
-          apiKeyProvider: "openai",
-          supportsModelSelection: true,
-          supportsVoiceSelection: true,
-          speedAppliedByProvider: true,
-        },
-        models: loadSynthesisModels("openai"),
-        request: (input) =>
-          Effect.succeed(
-            HttpClientRequest.post("https://api.openai.com/v1/audio/speech").pipe(
-              HttpClientRequest.bodyJsonUnsafe({
-                model: input.model || openAiSpeechModels[0].id,
-                input: input.text,
-                voice: input.voice || "alloy",
-                speed: input.speed,
-                response_format: "mp3",
-              }),
-            ),
-          ),
-        errorReason: synthesisErrorReason,
-      },
       xai: {
         catalog: {
           defaultModel: "grok-tts",
@@ -597,10 +560,12 @@ export const layer = Layer.effect(
                 voice_id: input.voice || "eve",
                 language: input.language,
                 speed: input.speed,
-                output_format: { codec: "mp3", sample_rate: 24000, bit_rate: 128000 },
+                // PCM, so the words can be timed from it; encoded to MP3 here.
+                output_format: { codec: "pcm", sample_rate: XAI_SPEECH_RATE },
               }),
             ),
           ),
+        pcmFormat: () => ({ rate: XAI_SPEECH_RATE, channels: 1 }),
         errorReason: synthesisErrorReason,
       },
       openrouter: {
@@ -683,15 +648,19 @@ export const layer = Layer.effect(
             })),
           ),
       },
-    } satisfies Record<CloudSpeechProvider, SynthesisBackend>;
+    } satisfies Record<CloudSpeechSynthesisProvider, SynthesisBackend>;
     const synthesisModels = Effect.fn("CloudSpeech.synthesisCatalog")(function* (
-      provider: CloudSpeechProvider,
+      provider: CloudSpeechSynthesisProvider,
     ) {
       const backend = synthesisBackends[provider];
       return yield* backend.models.pipe(
         Effect.map(({ models }) => ({
           ...backend.catalog,
-          defaultModel: backend.catalog.defaultModel || models[0]?.id || "",
+          defaultModel:
+            provider === "openrouter" &&
+            models.some((model) => model.id === OPENROUTER_DEFAULT_SYNTHESIS_MODEL)
+              ? OPENROUTER_DEFAULT_SYNTHESIS_MODEL
+              : backend.catalog.defaultModel || models[0]?.id || "",
           models,
         })),
         Effect.catchTags({
@@ -701,7 +670,7 @@ export const layer = Layer.effect(
       );
     });
     const synthesizePiece = Effect.fn("CloudSpeech.synthesizePiece")(
-      function* (provider: CloudSpeechProvider, input: SpeechSynthesisRequest) {
+      function* (provider: CloudSpeechSynthesisProvider, input: SpeechSynthesisRequest) {
         const unavailable = (cause?: unknown) =>
           isSynthesisError(cause)
             ? cause
@@ -722,14 +691,19 @@ export const layer = Layer.effect(
             : null;
         const cached = cacheKey === null ? Option.none() : yield* cache.readAudio(cacheKey);
         if (Option.isSome(cached)) {
-          const { audio, words } = cached.value;
-          return Stream.fromIterable<SpeechSynthesisPart>(
-            words.length ? [{ words }, audio] : [audio],
-          );
+          const { audio, words, pcm } = cached.value;
+          // The PCM goes first, so audio without word timings is timed again from it.
+          return Stream.fromIterable<SpeechSynthesisPart>([
+            ...(pcm ? [{ pcm: pcm.samples, rate: pcm.rate, startSeconds: 0 }] : []),
+            ...(words.length ? [{ words }] : []),
+            audio,
+          ]);
         }
         const recorded = {
           audio: new Array<Uint8Array>(),
           words: new Array<SpeechSynthesisWord>(),
+          pcm: new Array<Int16Array>(),
+          rate: 0,
         };
         // Only a piece that streamed to its end is cached; a stopped one is requested again.
         const record = <E>(parts: Stream.Stream<SpeechSynthesisPart, E>) =>
@@ -739,7 +713,11 @@ export const layer = Layer.effect(
                 Stream.tap((part) =>
                   Effect.sync(() => {
                     if (part instanceof Uint8Array) recorded.audio.push(part);
-                    else recorded.words.push(...part.words);
+                    else if ("pcm" in part) {
+                      // A piece's PCM arrives in order from its start, at one rate.
+                      recorded.pcm.push(part.pcm);
+                      recorded.rate = part.rate;
+                    } else recorded.words.push(...part.words);
                   }),
                 ),
                 Stream.onEnd(
@@ -748,6 +726,9 @@ export const layer = Layer.effect(
                       ? cache.writeAudio(cacheKey, {
                           audio: joinBytes(recorded.audio),
                           words: recorded.words,
+                          ...(recorded.pcm.length
+                            ? { pcm: { samples: joinSamples(recorded.pcm), rate: recorded.rate } }
+                            : {}),
                         })
                       : Effect.void,
                   ),
@@ -771,13 +752,49 @@ export const layer = Layer.effect(
             reason: backend.errorReason(response.status),
           });
         const format = backend.pcmFormat?.(response, input);
+        let size = 0;
+        const limited = <A extends Uint8Array>(chunks: Stream.Stream<A, unknown>) =>
+          chunks.pipe(
+            Stream.mapError(unavailable),
+            Stream.mapEffect((chunk) =>
+              (size += chunk.byteLength) > MAX_SYNTHESIS_BYTES
+                ? Effect.fail(unavailable())
+                : Effect.succeed(chunk),
+            ),
+            // The request timeout ends at the headers; a body that stalls must fail too.
+            Stream.timeoutOrElse({
+              duration: SYNTHESIS_STALL_TIMEOUT,
+              orElse: () => Stream.fail(unavailable()),
+            }),
+          );
         if (format) {
-          const pcm = yield* readSynthesisBody(response, provider, MAX_SYNTHESIS_BYTES);
+          if (!isEncodableFormat(format.rate, format.channels)) return yield* unavailable();
+          // Encoded as it arrives, so reading starts with the first chunk, not the whole reply.
+          const encoder = yield* Effect.promise(() =>
+            streamingMp3Encoder(format.rate, format.channels),
+          );
+          let seconds = 0;
           return record(
-            encodeMp3(pcm, format.rate, format.channels).pipe(Stream.mapError(unavailable)),
+            limited(response.stream).pipe(
+              Stream.flatMap((chunk) => {
+                const { pcm, mp3 } = encoder.push(chunk);
+                const parts: SpeechSynthesisPart[] = [];
+                if (pcm.length) {
+                  parts.push({ pcm, rate: format.rate, startSeconds: seconds });
+                  seconds += pcm.length / format.rate;
+                }
+                if (mp3.length) parts.push(mp3);
+                return Stream.fromIterable(parts);
+              }),
+              Stream.concat(
+                Stream.suspend(() => {
+                  const tail = encoder.flush();
+                  return Stream.fromIterable<SpeechSynthesisPart>(tail.length ? [tail] : []);
+                }),
+              ),
+            ),
           );
         }
-        let size = 0;
         const words = alignedWords(input.text);
         const parts: Stream.Stream<SpeechSynthesisPart, unknown> = backend.alignedAudio
           ? backend.alignedAudio(response).pipe(
@@ -822,46 +839,11 @@ export const layer = Layer.effect(
           }),
         ),
     );
-    // Pieces play back to back as one stream; each is requested once the last one ends. A piece's
-    // words move to their place in the request text and to where its audio starts.
-    const stream = (provider: CloudSpeechProvider, request: SpeechSynthesisRequest) =>
+    // Pieces play back to back as one stream. A piece's words move to their place in the request
+    // text and to where its audio starts.
+    const stream = (provider: CloudSpeechSynthesisProvider, request: SpeechSynthesisRequest) =>
       Stream.suspend(() => {
         let elapsed = 0;
-        const piece = (
-          text: string,
-          place: (start: number, end: number) => { start: number; end: number } | null,
-        ) =>
-          Stream.suspend(() => {
-            const offset = elapsed;
-            const duration = mp3Duration();
-            return Stream.unwrap(synthesizePiece(provider, { ...request, text })).pipe(
-              Stream.map((part): SpeechSynthesisPart => {
-                if (part instanceof Uint8Array) {
-                  duration.push(part);
-                  return part;
-                }
-                return {
-                  words: part.words.flatMap((word) => {
-                    const at = place(word.start, word.end);
-                    return at
-                      ? [
-                          {
-                            ...at,
-                            startSeconds: word.startSeconds + offset,
-                            endSeconds: word.endSeconds + offset,
-                          },
-                        ]
-                      : [];
-                  }),
-                };
-              }),
-              Stream.onEnd(
-                Effect.sync(() => {
-                  elapsed = offset + duration.seconds;
-                }),
-              ),
-            );
-          });
         const segments = synthesisSegments(request);
         return Stream.fromIterable(segments.entries()).pipe(
           Stream.flatMap(([index, segment]) =>
@@ -874,17 +856,59 @@ export const layer = Layer.effect(
                   request.text.slice(segment.start, segment.end),
                 );
                 return Stream.fromIterable(
-                  splitReadAloudSpans(spoken.text, CLOUD_SYNTHESIS_TEXT_LIMIT),
-                ).pipe(
-                  Stream.flatMap((span) =>
-                    piece(span.text, (start, end) => {
+                  splitReadAloudSpans(spoken.text, CLOUD_SYNTHESIS_TEXT_LIMIT).map((span) => ({
+                    text: span.text,
+                    place: (start: number, end: number) => {
                       const at = spoken.place(span.start + start, span.start + end);
                       return at && { start: segment.start + at.start, end: segment.start + at.end };
-                    }),
-                  ),
+                    },
+                  })),
                 );
               }),
             ),
+          ),
+          // Some providers return audio only once a whole piece is spoken, so the next piece is
+          // requested while this one plays.
+          Stream.mapEffect(
+            (piece) =>
+              synthesizePiece(provider, { ...request, text: piece.text }).pipe(
+                Effect.map((parts) => ({ place: piece.place, parts })),
+              ),
+            { concurrency: 2 },
+          ),
+          Stream.flatMap(({ place, parts }) =>
+            Stream.suspend(() => {
+              const offset = elapsed;
+              const duration = mp3Duration();
+              return parts.pipe(
+                Stream.map((part): SpeechSynthesisPart => {
+                  if (part instanceof Uint8Array) {
+                    duration.push(part);
+                    return part;
+                  }
+                  if ("pcm" in part) return { ...part, startSeconds: part.startSeconds + offset };
+                  return {
+                    words: part.words.flatMap((word) => {
+                      const at = place(word.start, word.end);
+                      return at
+                        ? [
+                            {
+                              ...at,
+                              startSeconds: word.startSeconds + offset,
+                              endSeconds: word.endSeconds + offset,
+                            },
+                          ]
+                        : [];
+                    }),
+                  };
+                }),
+                Stream.onEnd(
+                  Effect.sync(() => {
+                    elapsed = offset + duration.seconds;
+                  }),
+                ),
+              );
+            }),
           ),
           Stream.withSpan("CloudSpeech.stream"),
         );
