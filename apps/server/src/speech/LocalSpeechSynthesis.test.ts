@@ -16,6 +16,7 @@ import * as ServerConfig from "../config.ts";
 import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
 import type { LocalSynthesisModel } from "./localSynthesisWorker.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
+import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import * as SpeechModelStore from "./SpeechModelStore.ts";
 
 // Two MPEG-1 Layer III frames at 64 kbps and 44.1 kHz.
@@ -55,6 +56,7 @@ const withService = <A, E>(
   options: {
     readonly runtime?: boolean;
     readonly cache?: Layer.Layer<ReadAloudCache.ReadAloudCache>;
+    readonly speechText?: Layer.Layer<ReadAloudSpeechText.ReadAloudSpeechText>;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -84,6 +86,7 @@ const withService = <A, E>(
           }),
         ),
         Layer.provide(options.cache ?? ReadAloudCache.layerDisabled),
+        Layer.provide(options.speechText ?? ReadAloudSpeechText.layerPlain),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-local-speech-" })),
         Layer.provide(SecureRandom.layerWebCrypto),
         Layer.provideMerge(NodeServices.layer),
@@ -244,8 +247,38 @@ describe("read aloud cache for local models", () => {
   };
   const installed = { installedPath: () => Effect.succeed("/models/installed") };
 
+  const cacheIn = (directory: string) =>
+    Layer.effect(ReadAloudCache.ReadAloudCache, ReadAloudCache.make(directory)).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+
+  /** A cleaner that rewrites `from` as `to`; `version` stands for its configuration. */
+  const cleaning = (directory: string, version: string, from: string, to: string) =>
+    Layer.effect(
+      ReadAloudSpeechText.ReadAloudSpeechText,
+      ReadAloudSpeechText.makeWithCleaner(
+        Effect.succeed({
+          service: {
+            replace: (markdown: string) =>
+              Effect.succeed({
+                text: markdown === from ? to : markdown,
+                applied: markdown === from,
+                changes: markdown === from ? ["rewrite"] : [],
+                narrated: [],
+                skipped: [],
+              }),
+          },
+          configuration: [version],
+        }),
+      ),
+    ).pipe(Layer.provide(cacheIn(directory)));
+
   /** Plays `input` through a fresh service on `directory`, as after a server restart. */
-  const play = (directory: string, input: SpeechSynthesisRequest) =>
+  const play = (
+    directory: string,
+    input: SpeechSynthesisRequest,
+    speechText: Layer.Layer<ReadAloudSpeechText.ReadAloudSpeechText> = ReadAloudSpeechText.layerPlain,
+  ) =>
     withService(
       installed,
       (service) =>
@@ -256,11 +289,7 @@ describe("read aloud cache for local models", () => {
             pcm: parts.flatMap((part) => ("pcm" in part ? [part] : [])),
           })),
         ),
-      {
-        cache: Layer.effect(ReadAloudCache.ReadAloudCache, ReadAloudCache.make(directory)).pipe(
-          Layer.provide(NodeServices.layer),
-        ),
-      },
+      { cache: cacheIn(directory), speechText },
     );
 
   const tempDirectory = Effect.gen(function* () {
@@ -309,6 +338,28 @@ describe("read aloud cache for local models", () => {
       yield* play(directory, { ...request(2), speed: 1.3 });
       yield* play(directory, { ...request(2), speed: 1.3 });
       expect(worker.spoken).toEqual(["Third block.", "Third block.", "Third block."]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("speaks a block's cleaned text and caches the audio by that text", () =>
+    Effect.gen(function* () {
+      worker.load.mockClear();
+      worker.spoken.length = 0;
+      const directory = yield* tempDirectory;
+      const cleaned = cleaning(directory, "v1", "Second block.", "The second block, cleaned.");
+      yield* play(directory, request(1), cleaned);
+      // Only the block the cleaner rewrites reads differently.
+      expect(worker.spoken).toEqual(["The second block, cleaned.", "Third block."]);
+
+      // A replay after a restart reads the cached rewrite and its cached audio.
+      yield* play(directory, request(1), cleaning(directory, "v1", "Second block.", "unused"));
+      expect(worker.spoken).toHaveLength(2);
+      expect(worker.load).toHaveBeenCalledTimes(1);
+
+      // Without the cleaner, or with a cleaner that rewrites it otherwise, the block is new audio.
+      yield* play(directory, request(1));
+      yield* play(directory, request(1), cleaning(directory, "v2", "Second block.", "Block two."));
+      expect(worker.spoken.slice(2)).toEqual(["Second block.", "Block two."]);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

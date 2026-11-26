@@ -31,8 +31,13 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import * as SpeechModelStore from "./SpeechModelStore.ts";
-import { synthesisSegments, type SpeechSynthesisPart } from "./CloudSpeech.ts";
+import {
+  synthesisSegments,
+  type SpeechSynthesisPart,
+  type SynthesisSegment,
+} from "./CloudSpeech.ts";
 import * as ReadAloudCache from "./readAloudCache.ts";
+import * as ReadAloudSpeechText from "./readAloudSpeechText.ts";
 import { mp3Duration } from "./synthesisTimings.ts";
 import { loadLocalSynthesisModel, type LocalSynthesisModel } from "./localSynthesisWorker.ts";
 import { supertonicText } from "./synthesisAudio.ts";
@@ -299,6 +304,7 @@ const make = Effect.gen(function* () {
   const store = yield* SpeechModelStore.SpeechModelStore;
   const config = yield* ServerConfig.ServerConfig;
   const cache = yield* ReadAloudCache.ReadAloudCache;
+  const speechText = yield* ReadAloudSpeechText.ReadAloudSpeechText;
   const scope = yield* Effect.scope;
   const platform = yield* HostProcess.Platform;
   const architecture = yield* HostProcess.Architecture;
@@ -748,13 +754,20 @@ const make = Effect.gen(function* () {
   });
 
   // One block's audio, from the cache when it was synthesized before. A hit never loads the model.
+  // The block reads its speech text, as cloud synthesis does, and the next block's starts.
   const block = Effect.fnUntraced(function* (
     request: SpeechSynthesisRequest,
     synthesis: Synthesis,
-    plain: string,
+    segment: SynthesisSegment,
+    next: SynthesisSegment | undefined,
   ) {
     const { definition, voice } = synthesis;
-    const text = definition.speakable?.(plain) ?? plain;
+    if (next) yield* speechText.prepare(next.markdown);
+    const spoken = yield* speechText.speak(
+      segment.markdown,
+      request.text.slice(segment.start, segment.end),
+    );
+    const text = definition.speakable?.(spoken.text) ?? spoken.text;
     if (!text.trim()) return Stream.empty;
     // Everything that changes the audio. The language is the setting, which picks the same
     // model language every time, so the key needs no loaded model.
@@ -787,14 +800,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const synthesis = yield* resolveSynthesis(request);
         let elapsed = 0;
-        return Stream.fromIterable(synthesisSegments(request)).pipe(
-          Stream.flatMap((segment) =>
+        const segments = synthesisSegments(request);
+        return Stream.fromIterable(segments.entries()).pipe(
+          Stream.flatMap(([index, segment]) =>
             Stream.suspend(() => {
               const offset = elapsed;
               const duration = mp3Duration();
-              return Stream.unwrap(
-                block(request, synthesis, request.text.slice(segment.start, segment.end)),
-              ).pipe(
+              return Stream.unwrap(block(request, synthesis, segment, segments[index + 1])).pipe(
                 Stream.map((part): SpeechSynthesisPart => {
                   if (part instanceof Uint8Array) duration.push(part);
                   else if ("pcm" in part)

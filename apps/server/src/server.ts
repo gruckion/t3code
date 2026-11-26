@@ -307,6 +307,11 @@ const layerServerSettings = ServerSettings.layer.pipe(
   Layer.provideMerge(SqlitePersistence.layerConfig),
 );
 
+// One instance for cloud and local synthesis, so both read the same cached rewrites.
+const layerReadAloudSpeechText = ReadAloudSpeechText.layer.pipe(
+  Layer.provideMerge(ReadAloudCache.layer),
+);
+
 const layerNativeTelemetry = NativeTelemetryClient.layer.pipe(
   Layer.provide(ResourceMonitorBinary.layer),
 );
@@ -973,13 +978,13 @@ const layerMakeRoutes = Layer.mergeAll(
       SpeechService.layer.pipe(Layer.provide(layerServerSettings)),
       LocalSpeechSynthesis.layer,
       SpeechAligner.layer,
-    ).pipe(Layer.provide(SpeechModelStore.layer), Layer.provide(ReadAloudCache.layer)),
+    ).pipe(Layer.provide(SpeechModelStore.layer), Layer.provide(layerReadAloudSpeechText)),
   ),
   Layer.provide(OpenRouterSignIn.layer),
   Layer.provide(
     CloudSpeech.layer.pipe(
       Layer.provide(SecretResolver.layer),
-      Layer.provide(ReadAloudSpeechText.layer.pipe(Layer.provideMerge(ReadAloudCache.layer))),
+      Layer.provide(layerReadAloudSpeechText),
     ),
   ),
   Layer.provide(layerServerSettings),
