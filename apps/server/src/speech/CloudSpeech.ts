@@ -326,26 +326,6 @@ export function synthesisSegments(request: SpeechSynthesisRequest): Array<Synthe
   return segments;
 }
 
-function joinBytes(chunks: ReadonlyArray<Uint8Array>) {
-  const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
-function joinSamples(chunks: ReadonlyArray<Int16Array>) {
-  const samples = new Int16Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    samples.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return samples;
-}
-
 export class CloudSpeech extends Context.Service<
   CloudSpeech,
   {
@@ -690,50 +670,9 @@ export const layer = Layer.effect(
               ])
             : null;
         const cached = cacheKey === null ? Option.none() : yield* cache.readAudio(cacheKey);
-        if (Option.isSome(cached)) {
-          const { audio, words, pcm } = cached.value;
-          // The PCM goes first, so audio without word timings is timed again from it.
-          return Stream.fromIterable<SpeechSynthesisPart>([
-            ...(pcm ? [{ pcm: pcm.samples, rate: pcm.rate, startSeconds: 0 }] : []),
-            ...(words.length ? [{ words }] : []),
-            audio,
-          ]);
-        }
-        const recorded = {
-          audio: new Array<Uint8Array>(),
-          words: new Array<SpeechSynthesisWord>(),
-          pcm: new Array<Int16Array>(),
-          rate: 0,
-        };
-        // Only a piece that streamed to its end is cached; a stopped one is requested again.
+        if (Option.isSome(cached)) return ReadAloudCache.replayAudio(cached.value);
         const record = <E>(parts: Stream.Stream<SpeechSynthesisPart, E>) =>
-          cacheKey === null
-            ? parts
-            : parts.pipe(
-                Stream.tap((part) =>
-                  Effect.sync(() => {
-                    if (part instanceof Uint8Array) recorded.audio.push(part);
-                    else if ("pcm" in part) {
-                      // A piece's PCM arrives in order from its start, at one rate.
-                      recorded.pcm.push(part.pcm);
-                      recorded.rate = part.rate;
-                    } else recorded.words.push(...part.words);
-                  }),
-                ),
-                Stream.onEnd(
-                  Effect.suspend(() =>
-                    recorded.audio.length
-                      ? cache.writeAudio(cacheKey, {
-                          audio: joinBytes(recorded.audio),
-                          words: recorded.words,
-                          ...(recorded.pcm.length
-                            ? { pcm: { samples: joinSamples(recorded.pcm), rate: recorded.rate } }
-                            : {}),
-                        })
-                      : Effect.void,
-                  ),
-                ),
-              );
+          cacheKey === null ? parts : ReadAloudCache.recordAudio(cache, cacheKey, parts);
         // Resolved per piece and after building, which may fetch a catalog, so the key sent is
         // never older than the vault's state at send time.
         const key = yield* resolveKey(
