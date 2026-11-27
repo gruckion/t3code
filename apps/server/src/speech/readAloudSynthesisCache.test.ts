@@ -1,6 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it } from "@effect/vitest";
-import type { CloudSpeechSynthesisProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
+import type {
+  CloudSpeechSynthesisProvider,
+  SpeechSynthesisLevel,
+  SpeechSynthesisRequest,
+} from "@t3tools/contracts";
 import { readAloudSpeech } from "@t3tools/shared/read-aloud";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -119,11 +123,11 @@ const levels = (
     const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
     const token = yield* streams.start(cloud, request);
     let words = 0;
-    const values: number[] = [];
+    const values: SpeechSynthesisLevel[] = [];
     for (;;) {
       const timings = yield* streams.timings(token, words, values.length);
       words += timings.words.length;
-      if (timings.levels) values.push(...timings.levels.values);
+      values.push(...(timings.levels ?? []));
       if (timings.done) return values;
     }
   }).pipe(
@@ -208,8 +212,8 @@ describe("read aloud synthesis cache", () => {
         const sent = yield* levels(directory, upstream, request, cloud);
         const cached = yield* levels(directory, upstream, request, cloud);
         expect(upstream).toHaveBeenCalledTimes(5);
-        // xAI's cached PCM is measured again; ElevenLabs' MP3 is estimated again.
-        expect(sent.length).toBeGreaterThan(0);
+        // xAI's cached PCM is measured again; ElevenLabs sends MP3 alone, which has no levels.
+        expect(sent.length > 0).toBe(cloud === "xai");
         expect(cached).toEqual(sent);
       }).pipe(Effect.scoped),
   );

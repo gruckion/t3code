@@ -117,12 +117,11 @@ beside a completed assistant reply. Select it again to stop playback. Leaving th
 thread stops it. Code blocks are skipped by default.
 
 The paragraph and the word being read are highlighted, and the thread scrolls along until
-you scroll away. ElevenLabs reports when each word is spoken. For Grok TTS, local models and
-OpenRouter voices that return raw audio, your environment works it out from the audio with a
-small speech recognition model, downloaded the first time you choose one of them: 135 MB for
-English, or 740 MB for 25 languages, which non-English app languages use and which you can turn
-on under **Multilingual word timing**. Until it is installed, and for Japanese, Korean and
-Chinese replies, the highlighted word is an estimate.
+you scroll away. ElevenLabs reports when each word is spoken. For Grok TTS, OpenRouter and local
+models, the highlighted word is an estimate unless you download **Word timing** (about 200 MB) in
+**Settings → Voice → Read aloud**. With it, your environment lines the reply's words up with the
+audio, and reading picked up at a word starts right on it rather than at its sentence. Words not
+written in the Latin alphabet are still estimated.
 
 While a reply is read, a small player above the composer pauses, stops, and changes the speed,
 and brings you back to the word being read after you scroll away. Click or tap any word in the
@@ -137,12 +136,17 @@ your environment isn't reachable over HTTPS or on this computer, OpenRouter show
 back into T3 Code instead.
 
 **Local model** reads replies on your selected environment, so the text never leaves it.
-Download a model once from the same settings page. Kokoro (about 220 MB) is the default, with
-natural English voices plus Spanish, French, Hindi, Italian, and Portuguese. Supertonic 3
-(330–360 MB) speaks 31 languages and is fastest with a GPU. Pocket TTS (about 200 MB) speaks
-English and stays fast on machines without one. Like dictation models, they reuse a copy already in the Hugging Face
-cache, and on web or desktop you can paste the path of a copy elsewhere and choose **Use
-existing**. Local models use the GPU through Metal on Apple silicon Macs and Vulkan on Windows
+Download a model once from the same settings page, where you can search models and filter them by
+language. The list starts filtered to your language, so clear the filter to see every model.
+Kokoro (about 220 MB) is the default, with natural English voices plus Spanish, French, Hindi,
+Italian, and Portuguese. Qwen3-TTS 1.7B (about 2.8 GB) sounds the most natural and reads numbers
+and units best in ten languages, but needs a GPU and about 7 GB of memory; Qwen3-TTS 0.6B (about
+2 GB) is close behind and lighter. Tiny models such as Kale TTS, Piper, Kitten TTS Mini, and
+Pocket TTS stay fast without a GPU, while the largest need a GPU and several gigabytes of memory.
+Models with recorded voices imitate speakers from LibriTTS-R audiobook recordings. A few models
+are licensed for non-commercial use only, and their descriptions say so. Like dictation models,
+they reuse a copy already in the Hugging Face cache, and on web or desktop you can paste the path
+of a copy elsewhere and choose **Use existing**. Local models use the GPU through Metal on Apple silicon Macs and Vulkan on Windows
 and Linux, and run on macOS, Windows, and Linux with glibc 2.28 or newer.
 
 On mobile, **Background playback** allows speech to continue while the app is in the background.
@@ -193,6 +197,8 @@ Attached context—files, terminal excerpts, diff/file review comments, preview 
 ## Attached files
 
 Select any file chip in a draft or sent message to preview it (syntax-highlighted code/JSON, rendered/raw Markdown/HTML/CSV/TSV, audio playback, and ZIP folder browsing up to 50 MB). Large text files show a truncated preview—save the file to read it in full.
+
+When a preview asks for a file password, enter it and select **Unlock**. T3 Code uses the password on your device. Web and desktop can unlock supported PDF, ZIP, Office, and OpenDocument files. The mobile app can unlock ZIP attachments, and Android can unlock PDFs. Ebooks protected by DRM need a compatible reader.
 
 ## Images and videos in messages
 

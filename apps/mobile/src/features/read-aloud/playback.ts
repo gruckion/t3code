@@ -5,15 +5,17 @@ import {
   createTimedWords,
   type SpeechPlayback,
   type SpokenWord,
-  readAloudWordAlignment,
 } from "@t3tools/client-runtime/read-aloud";
 import {
   getSpeechSynthesisModels,
   getSpeechSynthesisTimings,
   prepareSpeechSynthesis,
+  speakSpeechMath,
   startSpeechSynthesis,
 } from "@t3tools/client-runtime/voice-input";
-import { spokenWordAt } from "@t3tools/shared/read-aloud";
+import { markdownMathRanges } from "@t3tools/shared/markdownMath";
+import { spokenWordAt, type SpeakMath } from "@t3tools/shared/read-aloud";
+import { AsyncResult } from "effect/reactivity";
 import { createAudioPlayer } from "expo-audio";
 import * as Speech from "expo-speech";
 import * as Option from "effect/Option";
@@ -24,10 +26,10 @@ import {
   type SpeechSynthesisCatalog,
 } from "@t3tools/contracts";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { mobilePreferencesAtom } from "../../state/preferences";
 import { environmentSession } from "../../state/session";
 import { createAudioPlaybackSession, disposeAudioPlayer } from "../../lib/audioSession";
 import { runSpeech } from "../voice-input/voiceDestination";
-import { SPEECH_LEVEL_INTERVAL_MS, throttleAudioLevels } from "./readAloudLevel";
 
 function pauseInBackground(settings: ReadAloudSettings) {
   const shouldPause = !settings.backgroundPlayback && AppState.currentState !== "active";
@@ -132,8 +134,35 @@ export const warmReadAloud = createReadAloudWarmup(async (environmentId, model) 
   await runSpeech(prepareSpeechSynthesis(prepared, model));
 });
 
+/**
+ * Words for the reply's formulas when replies render math, as screen readers say them. React Native
+ * cannot run Speech Rule Engine, so the read-aloud environment reads them; without math rendering,
+ * or without an environment, the reply's TeX is what is read.
+ */
+function prepareReadAloudMath(markdown: string): Promise<SpeakMath> | undefined {
+  const preferences = appAtomRegistry.get(mobilePreferencesAtom);
+  if (!AsyncResult.isSuccess(preferences) || !preferences.value.mathRenderingEnabled)
+    return undefined;
+  const environmentId = preferences.value.readAloud?.environmentId;
+  const prepared = environmentId
+    ? Option.getOrNull(
+        appAtomRegistry.get(environmentSession.preparedConnectionValueAtom(environmentId)),
+      )
+    : null;
+  const formulas = markdownMathRanges(markdown);
+  if (!prepared || formulas.length === 0) return undefined;
+  return runSpeech(speakSpeechMath(prepared, formulas, getActiveLocale())).then(
+    ({ words }) => {
+      const spoken = new Map(formulas.map((formula, index) => [formula.tex, words[index]]));
+      return (tex: string) => spoken.get(tex) ?? undefined;
+    },
+    // An environment without formula speech reads the TeX, as the reply would without rendering.
+    () => () => undefined,
+  );
+}
+
 export const readAloudController = createReadAloudController(
-  async (text, settings, signal, blocks) => {
+  async (text, settings, signal, blocks, from) => {
     if (settings.provider === "system") {
       const voices =
         settings.voice || Platform.OS === "android" ? await Speech.getAvailableVoicesAsync() : [];
@@ -153,13 +182,9 @@ export const readAloudController = createReadAloudController(
       : null;
     if (!prepared)
       throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
-    const alignment = readAloudWordAlignment(settings, getActiveLocale());
     let pendingCatalog = catalogs.get(signal);
     if (!pendingCatalog) {
-      pendingCatalog = runSpeech(
-        getSpeechSynthesisModels(prepared, settings.provider, alignment),
-        signal,
-      );
+      pendingCatalog = runSpeech(getSpeechSynthesisModels(prepared, settings.provider), signal);
       catalogs.set(signal, pendingCatalog);
     }
     const catalog = await pendingCatalog;
@@ -173,8 +198,8 @@ export const readAloudController = createReadAloudController(
         voice: settings.voice,
         speed: settings.speed,
         language: settings.language,
-        alignment,
         blocks,
+        ...(from === undefined ? {} : { from }),
       }),
       signal,
     );
@@ -202,35 +227,20 @@ export const readAloudController = createReadAloudController(
       settings.backgroundPlayback,
     );
     let timed: ReturnType<typeof createTimedWords> | null = null;
+    // The environment measures the loudness: iOS cannot tap a stream of unknown length, and
+    // Android samples only with the microphone permission.
     const timedWords = () =>
       (timed ??= createTimedWords({
         text,
-        load: (after, signal, levelsAfter) =>
+        load: (after, levelsAfter, signal) =>
           runSpeech(getSpeechSynthesisTimings(prepared, token, after, levelsAfter), signal),
         clock: () => ({
           seconds: player.currentTime,
           rate: player.playbackRate,
           playing: player.playing,
         }),
+        levels: true,
       }));
-    const levelListeners = new Set<(level: number) => void>();
-    let sampling: { remove: () => void } | null = null;
-    let metering: ReturnType<typeof setInterval> | null = null;
-    const reportLevel = (level: number) => {
-      for (const listener of levelListeners) listener(level);
-    };
-    const stopSampling = () => {
-      if (!sampling) return;
-      sampling.remove();
-      sampling = null;
-      player.setAudioSamplingEnabled(false);
-    };
-    const stopLevels = () => {
-      stopSampling();
-      if (metering) clearInterval(metering);
-      metering = null;
-      reportLevel(0);
-    };
     let done: () => void = () => {};
     const finished = new Promise<void>((resolve, reject) => {
       done = resolve;
@@ -264,14 +274,9 @@ export const readAloudController = createReadAloudController(
           player.setActiveForLockScreen(true, { title: "T3 Code", artist: "Read aloud" });
         if (!(await session.play())) throw new Error("Finish recording before reading aloud.");
       },
-      pause: () => {
-        session.pause();
-        reportLevel(0);
-      },
+      pause: () => session.pause(),
       stop: () => {
         timed?.stop();
-        stopLevels();
-        levelListeners.clear();
         stopWatching();
         session.stop();
         disposeAudioPlayer(player);
@@ -292,35 +297,9 @@ export const readAloudController = createReadAloudController(
       },
       // Audio a provider made at `settings.speed` plays at 1 for that speed.
       setSpeed: (speed) => player.setPlaybackRate(speedApplied ? speed / settings.speed : speed),
-      levels: (listener) => {
-        levelListeners.add(listener);
-        const words = timedWords();
-        // The environment measures its audio's loudness; the meter follows it on the audio clock,
-        // since iOS never hands sample buffers of streamed audio to the player's tap.
-        metering ??= setInterval(() => {
-          const level = words.levelAt(player.currentTime);
-          if (level === undefined) return;
-          stopSampling();
-          if (player.playing) reportLevel(level);
-        }, SPEECH_LEVEL_INTERVAL_MS);
-        // Until levels arrive, and from environments that send none, the player samples its
-        // audio. Android samples only with the microphone permission; without it the meter stays
-        // still.
-        if (!sampling && player.isAudioSamplingSupported) {
-          player.setAudioSamplingEnabled(true);
-          sampling = player.addListener(
-            "audioSampleUpdate",
-            throttleAudioLevels((level) => {
-              if (words.levelAt(player.currentTime) === undefined) reportLevel(level);
-            }),
-          );
-        }
-        return () => {
-          levelListeners.delete(listener);
-          if (levelListeners.size === 0) stopLevels();
-        };
-      },
+      levels: (listener) => timedWords().followLevels(listener),
     };
   },
   m,
+  prepareReadAloudMath,
 );

@@ -47,8 +47,6 @@ export const ReadAloudSettings = Schema.Struct({
   language: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(16)),
   skipCodeBlocks: Schema.Boolean,
   backgroundPlayback: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  /** English-locale users can trade the 135 MB English timing model for the multilingual one. */
-  multilingualWordTiming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ReadAloudSettings = typeof ReadAloudSettings.Type;
 export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
@@ -60,7 +58,6 @@ export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
   language: "auto",
   skipCodeBlocks: true,
   backgroundPlayback: true,
-  multilingualWordTiming: false,
 };
 export const ReadAloudPreference = ReadAloudSettings.pipe(
   Schema.withDecodingDefault(Effect.succeed(DEFAULT_READ_ALOUD_SETTINGS)),
@@ -80,9 +77,6 @@ export const SpeechSynthesisBlock = Schema.Struct({
   markdown: Schema.String.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
 });
 export type SpeechSynthesisBlock = typeof SpeechSynthesisBlock.Type;
-/** Which speech recognition model times the words of providers that report none. */
-export const SpeechWordAlignment = Schema.Literals(["english", "multilingual"]);
-export type SpeechWordAlignment = typeof SpeechWordAlignment.Type;
 export const SpeechSynthesisRequest = Schema.Struct({
   text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
   model: Schema.String.check(Schema.isMaxLength(160)),
@@ -92,11 +86,11 @@ export const SpeechSynthesisRequest = Schema.Struct({
   blocks: Schema.optionalKey(
     Schema.Array(SpeechSynthesisBlock).check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
   ),
-  alignment: Schema.optionalKey(SpeechWordAlignment),
-});
-export const SpeechSynthesisCatalogQuery = Schema.Struct({
-  /** Fetches that timing model in the background when the provider reports no word timings. */
-  alignment: Schema.optionalKey(SpeechWordAlignment),
+  /**
+   * UTF-16 offset of the word the audio starts at. The text before it is still synthesized, so a
+   * voice picking up mid-sentence reads in context; its audio and timings are dropped.
+   */
+  from: Schema.optionalKey(NonNegativeInt),
 });
 export type SpeechSynthesisRequest = typeof SpeechSynthesisRequest.Type;
 /** Single-purpose credential for `SPEECH_SYNTHESIS_AUDIO_PATH`, so media elements need no headers. */
@@ -115,23 +109,15 @@ export const SpeechSynthesisWord = Schema.Struct({
   endSeconds: Schema.Finite,
 });
 export type SpeechSynthesisWord = typeof SpeechSynthesisWord.Type;
-/** Loudness levels run from 0 (silence) to this, in whole steps, to keep timings small. */
-export const SPEECH_SYNTHESIS_LEVEL_STEPS = 20;
-/**
- * How loud a synthesis' audio is, one level per `windowSeconds` of audio from level `start`,
- * so players whose own audio sampling does not reach streamed audio can still draw a meter.
- */
-export const SpeechSynthesisLevels = Schema.Struct({
-  windowSeconds: Schema.Finite,
-  start: NonNegativeInt,
-  values: Schema.Array(
-    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: SPEECH_SYNTHESIS_LEVEL_STEPS })),
-  ),
+/** How loud the audio is around `seconds` into it, from 0 (silence) to 1. */
+export const SpeechSynthesisLevel = Schema.Struct({
+  seconds: Schema.Finite,
+  level: Schema.Finite,
 });
-export type SpeechSynthesisLevels = typeof SpeechSynthesisLevels.Type;
+export type SpeechSynthesisLevel = typeof SpeechSynthesisLevel.Type;
 /**
- * Reads the word timings of a started synthesis after the first `after` words, and its levels
- * after the first `levelsAfter` when that is set.
+ * Reads the word timings of a started synthesis after the first `after` words. `levelsAfter` also
+ * reads its loudness after that many levels, for players that cannot measure the audio they play.
  */
 export const SpeechSynthesisTimingsRequest = Schema.Struct({
   token: Schema.String,
@@ -139,16 +125,30 @@ export const SpeechSynthesisTimingsRequest = Schema.Struct({
   levelsAfter: Schema.optionalKey(NonNegativeInt),
 });
 /**
- * Answers once new words or levels exist or synthesis ends; `durationSeconds` comes with the end.
- * `levels` comes only when the request asks for them and the environment has some.
+ * Answers once new words, or new levels when asked for, exist or synthesis ends;
+ * `durationSeconds` comes with the end. Levels exist only for audio the environment decodes.
  */
 export const SpeechSynthesisTimings = Schema.Struct({
   words: Schema.Array(SpeechSynthesisWord),
+  levels: Schema.optionalKey(Schema.Array(SpeechSynthesisLevel)),
   done: Schema.Boolean,
   durationSeconds: Schema.optionalKey(Schema.Finite),
-  levels: Schema.optionalKey(SpeechSynthesisLevels),
 });
 export type SpeechSynthesisTimings = typeof SpeechSynthesisTimings.Type;
+/** A reply's formulas as TeX, each set as a block (`display`) or inline, to be read as words. */
+export const SpeechMathRequest = Schema.Struct({
+  formulas: Schema.Array(
+    Schema.Struct({
+      tex: Schema.String.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT)),
+      display: Schema.Boolean,
+    }),
+  ).check(Schema.isMaxLength(1_000)),
+  /** The app's language; formulas are read in English where the environment has no rules for it. */
+  language: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(16)),
+});
+/** The words for each formula, in order, as screen readers say them; null for one read as its TeX. */
+export const SpeechMath = Schema.Struct({ words: Schema.Array(Schema.NullOr(Schema.String)) });
+export type SpeechMath = typeof SpeechMath.Type;
 export const SpeechSynthesisModelInstall = Schema.Struct({
   state: Schema.Literals(["downloadable", "downloading", "verifying", "installed"]),
   /** Bytes to download, including the speech runtime when this environment lacks it. */
@@ -158,6 +158,8 @@ export const SpeechSynthesisModelInstall = Schema.Struct({
   linkedFrom: Schema.optionalKey(Schema.String),
 });
 export type SpeechSynthesisModelInstall = typeof SpeechSynthesisModelInstall.Type;
+/** The local model that times the words of speech whose provider reports none. */
+export const WORD_TIMING_MODEL_ID = "word-timing";
 /** An empty model loads the environment's default local model. */
 export const SpeechSynthesisPrepareRequest = Schema.Struct({
   model: Schema.String.check(Schema.isMaxLength(160)),
@@ -173,6 +175,11 @@ export const SpeechSynthesisCatalog = Schema.Struct({
   speedAppliedByProvider: Schema.Boolean,
   /** Absent when the timings are `estimated`. */
   wordTimings: Schema.optionalKey(ReadAloudWordTimings),
+  /**
+   * Present when the words are estimated and this environment can time them instead, once
+   * `WORD_TIMING_MODEL_ID` is downloaded like a local model.
+   */
+  wordTimingModel: Schema.optionalKey(SpeechSynthesisModelInstall),
   error: Schema.optionalKey(Schema.String),
   models: Schema.Array(
     Schema.Struct({
@@ -182,6 +189,9 @@ export const SpeechSynthesisCatalog = Schema.Struct({
       voices: Schema.Array(Schema.String),
       /** Display names for voices whose ids are opaque. */
       voiceNames: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+      /** The languages a model speaks, as ISO 639-1 codes, when its provider says. */
+      languages: Schema.optionalKey(Schema.Array(Schema.String)),
+      recommended: Schema.optionalKey(Schema.Boolean),
       /** Present for models that run on the environment and must be downloaded first. */
       install: Schema.optionalKey(SpeechSynthesisModelInstall),
       /** Overrides the catalog's `speedAppliedByProvider` for this model. */

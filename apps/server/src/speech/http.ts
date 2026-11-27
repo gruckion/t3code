@@ -35,8 +35,8 @@ import * as CloudSpeech from "./CloudSpeech.ts";
 import * as OpenRouterSignIn from "./OpenRouterSignIn.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as LocalSpeechSynthesis from "./LocalSpeechSynthesis.ts";
-import * as SpeechAligner from "./SpeechAligner.ts";
 import * as SpeechService from "./SpeechService.ts";
+import * as MathSpeech from "./MathSpeech.ts";
 import * as SpeechSynthesisStreams from "./synthesisStreams.ts";
 
 const MAX_TRANSCRIBE_BODY_BYTES = SpeechService.MAX_SPEECH_BYTES + SPEECH_MAX_OPTIONS_BYTES + 4;
@@ -139,8 +139,14 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
     const openRouter = yield* OpenRouterSignIn.OpenRouterSignIn;
     const environment = yield* ServerEnvironment.ServerEnvironment;
     const local = yield* LocalSpeechSynthesis.LocalSpeechSynthesis;
+    // Estimated words can be timed on this environment once its word timing model is installed.
+    const withWordTiming = Effect.fnUntraced(function* (catalog: SpeechSynthesisCatalog) {
+      if (catalog.wordTimings === "provider") return catalog;
+      const wordTimingModel = yield* local.wordTiming;
+      return wordTimingModel ? { ...catalog, wordTimingModel } : catalog;
+    });
     const synthesisStreams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
-    const aligner = yield* SpeechAligner.SpeechAligner;
+    const mathSpeech = yield* MathSpeech.MathSpeech;
     const mapInstallError = <A, R>(
       effect: Effect.Effect<A, LocalSpeechSynthesis.LocalSynthesisInstallError, R>,
     ) =>
@@ -189,10 +195,7 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
                       failEnvironmentInternal("internal_error", error),
                   }),
                 );
-          // Choosing a provider without word timings fetches the model that times them.
-          if (args.query.alignment && catalog.wordTimings !== "provider")
-            yield* aligner.prepare(args.query.alignment);
-          return catalog;
+          return yield* withWordTiming(catalog);
         }),
       )
       .handle(
@@ -223,6 +226,15 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "speakMath",
+        Effect.fn("environment.voice.speakMath")(function* (args) {
+          yield* guard(args.endpoint.name);
+          return {
+            words: yield* mathSpeech.speak(args.payload.formulas, args.payload.language),
+          };
+        }),
+      )
+      .handle(
         "prepareSynthesisModel",
         Effect.fn("environment.voice.prepareSynthesisModel")(function* (args) {
           yield* guard(args.endpoint.name);
@@ -235,7 +247,11 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
           yield* guard(args.endpoint.name, AuthSettingsWriteScope);
           return yield* local
             .download(args.payload.modelId)
-            .pipe(mapInstallError, Effect.flatMap(withoutCatalogHostPaths));
+            .pipe(
+              mapInstallError,
+              Effect.flatMap(withoutCatalogHostPaths),
+              Effect.flatMap(withWordTiming),
+            );
         }),
       )
       .handle(
@@ -244,7 +260,7 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
           yield* guard(args.endpoint.name, AuthSettingsWriteScope);
           return yield* local
             .cancel(args.payload.modelId)
-            .pipe(Effect.flatMap(withoutCatalogHostPaths));
+            .pipe(Effect.flatMap(withoutCatalogHostPaths), Effect.flatMap(withWordTiming));
         }),
       )
       .handle(
@@ -253,7 +269,11 @@ export const speechHttpApiLayer = HttpApiBuilder.group(
           yield* guard(args.endpoint.name, AuthSettingsWriteScope);
           return yield* local
             .remove(args.payload.modelId)
-            .pipe(mapInstallError, Effect.flatMap(withoutCatalogHostPaths));
+            .pipe(
+              mapInstallError,
+              Effect.flatMap(withoutCatalogHostPaths),
+              Effect.flatMap(withWordTiming),
+            );
         }),
       )
       .handle(

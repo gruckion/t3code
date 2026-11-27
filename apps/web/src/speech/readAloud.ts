@@ -1,4 +1,4 @@
-import { getActiveLocale, m } from "~/i18n/messages";
+import { m } from "~/i18n/messages";
 import { prepareReadAloudMath } from "./readAloudMath";
 import { speechSpeedAppliedByProvider, type SpeechSynthesisCatalog } from "@t3tools/contracts";
 import {
@@ -7,7 +7,6 @@ import {
   createTimedWords,
   type SpeechPlayback,
   type SpokenWord,
-  readAloudWordAlignment,
 } from "@t3tools/client-runtime/read-aloud";
 import {
   getSpeechSynthesisModels,
@@ -17,7 +16,7 @@ import {
 } from "@t3tools/client-runtime/voice-input";
 import { spokenWordAt } from "@t3tools/shared/read-aloud";
 import { readPreparedConnection } from "../state/session";
-import { playbackLevels } from "./playbackLevels";
+import { canCapturePlayback, playbackLevels } from "./playbackLevels";
 import { runEnvironmentSpeech } from "./runEnvironmentSpeech";
 
 function systemPlayback(
@@ -85,20 +84,18 @@ export const warmReadAloud = createReadAloudWarmup(async (environmentId, model) 
 });
 
 export const readAloudController = createReadAloudController(
-  async (text, settings, signal, blocks) => {
+  async (text, settings, signal, blocks, from) => {
     if (settings.provider === "system")
       return systemPlayback(text, settings.voice, settings.speed, settings.language);
     if (settings.provider === "off") throw new Error("Enable read aloud in Settings → Voice.");
     const prepared = settings.environmentId ? readPreparedConnection(settings.environmentId) : null;
     if (!prepared)
       throw new Error("Connect to the read-aloud environment selected in Settings → Voice.");
-    const alignment = readAloudWordAlignment(settings, getActiveLocale());
     let pendingCatalog = catalogs.get(signal);
     if (!pendingCatalog) {
-      pendingCatalog = runEnvironmentSpeech(
-        getSpeechSynthesisModels(prepared, settings.provider, alignment),
-        { signal },
-      );
+      pendingCatalog = runEnvironmentSpeech(getSpeechSynthesisModels(prepared, settings.provider), {
+        signal,
+      });
       catalogs.set(signal, pendingCatalog);
     }
     const catalog = await pendingCatalog;
@@ -112,8 +109,8 @@ export const readAloudController = createReadAloudController(
         voice: settings.voice,
         speed: settings.speed,
         language: settings.language,
-        alignment,
         blocks,
+        ...(from === undefined ? {} : { from }),
       }),
       { signal },
     );
@@ -132,6 +129,27 @@ export const readAloudController = createReadAloudController(
       audio.onerror = () => reject(new Error("Could not play the generated speech."));
     });
     let timed: ReturnType<typeof createTimedWords> | null = null;
+    // Safari cannot capture the audio element's output, so the meter follows the loudness the
+    // environment measured instead.
+    const measured = !canCapturePlayback(audio);
+    const timedWords = () => {
+      if (timed) return timed;
+      const created = createTimedWords({
+        text,
+        load: (after, levelsAfter, signal) =>
+          runEnvironmentSpeech(getSpeechSynthesisTimings(prepared, token, after, levelsAfter), {
+            signal,
+          }),
+        clock: () => ({
+          seconds: audio.currentTime,
+          rate: audio.playbackRate,
+          playing: !audio.paused,
+        }),
+        levels: measured,
+      });
+      for (const type of CLOCK_EVENTS) audio.addEventListener(type, created.refresh);
+      return (timed = created);
+    };
     return {
       play: () => audio.play(),
       pause: () => audio.pause(),
@@ -144,22 +162,7 @@ export const readAloudController = createReadAloudController(
         done();
       },
       finished,
-      words: (listener) => {
-        if (!timed) {
-          timed = createTimedWords({
-            text,
-            load: (after, signal) =>
-              runEnvironmentSpeech(getSpeechSynthesisTimings(prepared, token, after), { signal }),
-            clock: () => ({
-              seconds: audio.currentTime,
-              rate: audio.playbackRate,
-              playing: !audio.paused,
-            }),
-          });
-          for (const type of CLOCK_EVENTS) audio.addEventListener(type, timed.refresh);
-        }
-        return timed.subscribe(listener);
-      },
+      words: (listener) => timedWords().subscribe(listener),
       seek: (at) => {
         const seconds = timed?.secondsAt(at);
         // A live stream ignores seeks beyond what the browser can seek, so those read again instead.
@@ -172,7 +175,8 @@ export const readAloudController = createReadAloudController(
         audio.playbackRate = speed / synthesizedSpeed;
         timed?.refresh();
       },
-      levels: (listener) => playbackLevels(audio, listener),
+      levels: (listener) =>
+        measured ? timedWords().followLevels(listener) : playbackLevels(audio, listener),
     };
   },
   m,

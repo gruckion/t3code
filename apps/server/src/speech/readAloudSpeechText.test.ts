@@ -211,16 +211,8 @@ describe("read aloud speech text", () => {
           ([, init]) => (JSON.parse(String(init?.body)) as { text: string }).text,
         ),
       ).toEqual(["Intro here.", "Open src main.ts now.", "The end."]);
-      expect(words).toEqual([
-        "Intro",
-        "here.",
-        "Open",
-        "src/main.ts",
-        "src/main.ts",
-        "now.",
-        "The",
-        "end.",
-      ]);
+      // The request reads the path by its file name, so the added "src" joins the word before it.
+      expect(words).toEqual(["Intro", "here.", "Open", "Open", "main.ts", "now.", "The", "end."]);
       // The rewrite and its audio are cached, so reading again sends nothing.
       expect(yield* read).toEqual(words);
       expect(upstream).toHaveBeenCalledTimes(3);

@@ -109,6 +109,7 @@ import IconPlayerPauseFilled from "@tabler/icons-react-native/IconPlayerPauseFil
 import IconPlayerPlay from "@tabler/icons-react-native/IconPlayerPlay";
 import IconPlayerPlayFilled from "@tabler/icons-react-native/IconPlayerPlayFilled";
 import IconPlayerStopFilled from "@tabler/icons-react-native/IconPlayerStopFilled";
+import IconVolume from "@tabler/icons-react-native/IconVolume";
 import IconPlus from "@tabler/icons-react-native/IconPlus";
 import IconQrcode from "@tabler/icons-react-native/IconQrcode";
 import IconRefresh from "@tabler/icons-react-native/IconRefresh";
@@ -130,6 +131,7 @@ import IconTextIncrease from "@tabler/icons-react-native/IconTextIncrease";
 import IconTool from "@tabler/icons-react-native/IconTool";
 import IconTrash from "@tabler/icons-react-native/IconTrash";
 import IconTypography from "@tabler/icons-react-native/IconTypography";
+import IconLetterCase from "@tabler/icons-react-native/IconLetterCase";
 import IconDownload from "@tabler/icons-react-native/IconDownload";
 import IconSitemap from "@tabler/icons-react-native/IconSitemap";
 import IconUpload from "@tabler/icons-react-native/IconUpload";
@@ -280,6 +282,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "star.fill": IconStarFilled,
   "sun.max": IconSun,
   "stop.fill": IconPlayerStopFilled,
+  "speaker.wave.2": IconVolume,
   target: IconTarget,
   terminal: IconTerminal2,
   "text.alignleft": IconAlignLeft,
@@ -292,6 +295,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "ellipsis.bubble": IconMessageDots,
   robot: IconRobot,
   "text.word.spacing": IconLetterSpacing,
+  textformat: IconLetterCase,
   "textformat.size": IconTypography,
   "textformat.size.larger": IconTextIncrease,
   "textformat.size.smaller": IconTextDecrease,

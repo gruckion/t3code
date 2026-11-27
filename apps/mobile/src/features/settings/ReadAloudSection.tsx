@@ -3,7 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as Speech from "expo-speech";
-import { useGT, useLocale } from "gt-react-native";
+import { T, useGT } from "gt-react-native";
 import { ScrollView, TextInput, View } from "react-native";
 import {
   AuthSettingsWriteScope,
@@ -13,6 +13,7 @@ import {
   EMPTY_SPEECH_SYNTHESIS_CATALOG,
   type ReadAloudSettings,
   type SpeechSynthesisCatalog,
+  WORD_TIMING_MODEL_ID,
 } from "@t3tools/contracts";
 import {
   cancelSpeechSynthesisModelDownload,
@@ -21,7 +22,6 @@ import {
   removeSpeechSynthesisModel,
   setCloudSpeechKey,
 } from "@t3tools/client-runtime/voice-input";
-import { readAloudWordAlignment } from "@t3tools/client-runtime/read-aloud";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironments } from "../../state/environments";
@@ -34,19 +34,17 @@ import { ListToggleRow } from "../../components/ui/ListToggleRow";
 import { Sheet } from "../../components/ui/Sheet";
 import { Button } from "../../components/ui/Button";
 import { OpenRouterSignIn } from "./OpenRouterSignIn";
+import { CatalogPicker } from "./CatalogPicker";
 import { runSpeech } from "../voice-input/voiceDestination";
 import { readAloudController } from "../read-aloud/playback";
 
 export function ReadAloudSection() {
   const gt = useGT();
-  const locale = useLocale();
   const preferences = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomCommand(saveMobilePreferences);
   const settings = AsyncResult.isSuccess(preferences)
     ? (preferences.value.readAloud ?? DEFAULT_READ_ALOUD_SETTINGS)
     : DEFAULT_READ_ALOUD_SETTINGS;
-  const alignment = readAloudWordAlignment(settings, locale);
-  const englishLocale = /^en(?:-|$)/i.test(locale);
   const prepared = Option.getOrNull(usePreparedConnection(settings.environmentId));
   const canManage = useEnvironmentScope(settings.environmentId, AuthSettingsWriteScope);
   const { environments } = useEnvironments();
@@ -113,10 +111,7 @@ export function ReadAloudSection() {
   useEffect(() => {
     if (!prepared || settings.provider === "system" || settings.provider === "off") return;
     const abort = new AbortController();
-    void runSpeech(
-      getSpeechSynthesisModels(prepared, settings.provider, alignment),
-      abort.signal,
-    ).then(
+    void runSpeech(getSpeechSynthesisModels(prepared, settings.provider), abort.signal).then(
       (value) => {
         if (!abort.signal.aborted)
           setCatalogState({
@@ -140,7 +135,7 @@ export function ReadAloudSection() {
       abort.abort();
       keyRequestVersion.current++;
     };
-  }, [prepared, settings.provider, catalogKey, catalogVersion, alignment]);
+  }, [prepared, settings.provider, catalogKey, catalogVersion]);
   const selectedModel = catalog.models.find((entry) => entry.id === model);
   const install = settings.provider === "local" ? selectedModel?.install : undefined;
   // Keyed by environment and model, so switching models mid-download doesn't move the spinner.
@@ -148,25 +143,32 @@ export function ReadAloudSection() {
   const [installing, setInstalling] = useState<string | null>(null);
   const downloading =
     installing === installKey || install?.state === "downloading" || install?.state === "verifying";
+  const wordTiming = catalog.wordTimingModel;
+  const wordTimingKey = JSON.stringify([settings.environmentId, WORD_TIMING_MODEL_ID]);
+  const timingDownloading =
+    installing === wordTimingKey ||
+    wordTiming?.state === "downloading" ||
+    wordTiming?.state === "verifying";
   // Waits for the catalog request in flight; refreshing again would abort it.
   const refreshing = catalogState.version !== catalogVersion;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Poll the environment's download progress while it runs.
   useEffect(() => {
-    if (!downloading || refreshing) return;
+    if ((!downloading && !timingDownloading) || refreshing) return;
     const timer = setTimeout(() => setCatalogVersion((value) => value + 1), 1_000);
     return () => clearTimeout(timer);
-  }, [downloading, refreshing]);
-  const changeInstall = (action: "download" | "cancel" | "remove") => {
-    if (!prepared || !selectedModel) return;
-    const requestKey = installKey;
+  }, [downloading, timingDownloading, refreshing]);
+  const selectedTarget = selectedModel ? { id: selectedModel.id, key: installKey } : undefined;
+  const changeInstall = (action: "download" | "cancel" | "remove", target = selectedTarget) => {
+    if (!prepared || !target) return;
+    const requestKey = target.key;
     if (action === "download") setInstalling(requestKey);
     setError("");
     void runSpeech(
       action === "download"
-        ? downloadSpeechSynthesisModel(prepared, selectedModel.id)
+        ? downloadSpeechSynthesisModel(prepared, target.id)
         : action === "cancel"
-          ? cancelSpeechSynthesisModelDownload(prepared, selectedModel.id)
-          : removeSpeechSynthesisModel(prepared, selectedModel.id),
+          ? cancelSpeechSynthesisModelDownload(prepared, target.id)
+          : removeSpeechSynthesisModel(prepared, target.id),
     )
       .then(
         () => {},
@@ -229,7 +231,7 @@ export function ReadAloudSection() {
               catalog.supportsModelSelection &&
               catalog.models.length > 0 && (
                 <ListActionRow
-                  label={gt("Speech model")}
+                  label={gt("Model", { $context: "text-to-speech model setting" })}
                   detail={selectedModel?.name || model || gt("Choose a model")}
                   onPress={() => setSheet("model")}
                 />
@@ -263,16 +265,6 @@ export function ReadAloudSection() {
               value={settings.skipCodeBlocks}
               onValueChange={(skipCodeBlocks) => change({ skipCodeBlocks })}
             />
-            {englishLocale && catalog.wordTimings !== "provider" ? (
-              <ListToggleRow
-                label={gt("Multilingual word timing")}
-                description={gt(
-                  "Highlight the spoken word in 25 languages. Downloads a 740 MB model instead of a 135 MB one.",
-                )}
-                value={settings.multilingualWordTiming}
-                onValueChange={(multilingualWordTiming) => change({ multilingualWordTiming })}
-              />
-            ) : null}
             <ListActionRow
               label={
                 state.id === "preview" && state.status !== "error"
@@ -322,6 +314,53 @@ export function ReadAloudSection() {
               detail={gt("{size} MB", { size: Math.round(install.size / 1024 / 1024) })}
               disabled={!canManage}
               onPress={() => changeInstall("download")}
+            />
+          )}
+        </ListSection>
+      )}
+      {wordTiming && prepared && settings.provider !== "off" && (
+        <ListSection
+          title={gt("Word timing")}
+          footer={gt(
+            "Follows each spoken word exactly and starts reading right at the word you pick. Without it, the highlight is estimated. The model is for non-commercial use only.",
+          )}
+        >
+          {timingDownloading ? (
+            <ListActionRow
+              label={gt("Cancel word timing download")}
+              detail={
+                wordTiming.state === "verifying"
+                  ? gt("Verifying…")
+                  : gt("{percent}% downloaded", {
+                      percent:
+                        wordTiming.downloaded === undefined
+                          ? 0
+                          : Math.round((wordTiming.downloaded / wordTiming.size) * 100),
+                    })
+              }
+              disabled={!canManage}
+              onPress={() =>
+                changeInstall("cancel", { id: WORD_TIMING_MODEL_ID, key: wordTimingKey })
+              }
+            />
+          ) : wordTiming.state === "installed" ? (
+            <ListActionRow
+              label={gt("Delete the word timing model")}
+              detail={gt("Installed")}
+              tone="danger"
+              disabled={!canManage}
+              onPress={() =>
+                changeInstall("remove", { id: WORD_TIMING_MODEL_ID, key: wordTimingKey })
+              }
+            />
+          ) : (
+            <ListActionRow
+              label={gt("Download the word timing model")}
+              detail={gt("{size} MB", { size: Math.round(wordTiming.size / 1024 / 1024) })}
+              disabled={!canManage}
+              onPress={() =>
+                changeInstall("download", { id: WORD_TIMING_MODEL_ID, key: wordTimingKey })
+              }
             />
           )}
         </ListSection>
@@ -409,11 +448,12 @@ export function ReadAloudSection() {
             sheet === "source"
               ? gt("Speech provider")
               : sheet === "model"
-                ? gt("Speech model")
+                ? gt("Model", { $context: "text-to-speech model setting" })
                 : gt("Voice", { $context: "the speaker voice used to read text aloud" })
           }
           onClose={() => setSheet(null)}
         >
+          {/* Starts below the sheet's translucent header, which otherwise covers the first row. */}
           <ScrollView
             contentInsetAdjustmentBehavior="automatic"
             contentContainerClassName="gap-3 px-5 pt-2 pb-8"
@@ -488,37 +528,41 @@ export function ReadAloudSection() {
                 ))}
               </>
             ) : sheet === "model" ? (
+              <CatalogPicker
+                items={catalog.models}
+                value={settings.model || catalog.defaultModel}
+                onChange={(model) => {
+                  change({ model: model.id, voice: "" });
+                  setSheet(null);
+                }}
+                searchLabel={gt("Search speech models")}
+                placeholder={gt("Search speech models")}
+                empty={<T>No speech model matches.</T>}
+                showAllLabel={(count) =>
+                  gt(
+                    "{count, plural, one {Show all {count} models} other {Show all {count} models}}",
+                    {
+                      count,
+                    },
+                  )
+                }
+                describe={(model) =>
+                  model.install ? (model.recommended ? gt("Recommended") : undefined) : model.id
+                }
+              />
+            ) : voiceChoices.length === 0 ? (
               <ListSection>
-                {catalog.models.map((model) => (
-                  <ListChoiceRow
-                    key={model.id}
-                    label={model.name}
-                    {...(model.install && model.id === catalog.defaultModel
-                      ? { description: gt("Recommended") }
-                      : {})}
-                    selected={(settings.model || catalog.defaultModel) === model.id}
-                    onPress={() => {
-                      change({ model: model.id, voice: "" });
-                      setSheet(null);
-                    }}
+                <View className="p-4">
+                  <TextInput
+                    accessibilityLabel={gt("Read-aloud voice")}
+                    placeholder={gt("Default voice")}
+                    value={settings.voice}
+                    onChangeText={(voice) => change({ voice })}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    className="rounded-lg border border-border-subtle px-3 py-2 text-foreground"
                   />
-                ))}
-              </ListSection>
-            ) : (
-              <ListSection>
-                {voiceChoices.length === 0 && (
-                  <View className="p-4">
-                    <TextInput
-                      accessibilityLabel={gt("Read-aloud voice")}
-                      placeholder={gt("Default voice")}
-                      value={settings.voice}
-                      onChangeText={(voice) => change({ voice })}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      className="rounded-lg border border-border-subtle px-3 py-2 text-foreground"
-                    />
-                  </View>
-                )}
+                </View>
                 <ListChoiceRow
                   label={gt("Default", { $context: "default voice" })}
                   selected={!settings.voice}
@@ -527,18 +571,31 @@ export function ReadAloudSection() {
                     setSheet(null);
                   }}
                 />
-                {voiceChoices.map((voice) => (
-                  <ListChoiceRow
-                    key={voice.id}
-                    label={voice.name}
-                    selected={settings.voice === voice.id}
-                    onPress={() => {
-                      change({ voice: voice.id });
-                      setSheet(null);
-                    }}
-                  />
-                ))}
               </ListSection>
+            ) : (
+              <CatalogPicker
+                items={[
+                  { id: "", name: gt("Default", { $context: "default voice" }) },
+                  ...voiceChoices,
+                ]}
+                value={settings.voice}
+                onChange={(voice) => {
+                  change({ voice: voice.id });
+                  setSheet(null);
+                }}
+                searchLabel={gt("Search voices")}
+                placeholder={gt("Search voices")}
+                empty={<T>No voice matches.</T>}
+                showAllLabel={(count) =>
+                  gt(
+                    "{count, plural, one {Show all {count} voices} other {Show all {count} voices}}",
+                    {
+                      count,
+                    },
+                  )
+                }
+                describe={() => undefined}
+              />
             )}
           </ScrollView>
         </Sheet>

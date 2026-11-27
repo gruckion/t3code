@@ -2,9 +2,18 @@ import { useAtomValue } from "@effect/atom-react";
 import { DEFAULT_READ_ALOUD_SETTINGS, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useGT } from "gt-react-native";
-import { useEffect, useSyncExternalStore } from "react";
+import { memo, useEffect, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
-import Animated, { FadeInDown, FadeOut, useSharedValue } from "react-native-reanimated";
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeOut,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from "react-native-reanimated";
 
 import { ComposerSurface } from "../../components/ComposerSurface";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -13,15 +22,19 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { CompactVoiceWaveform } from "../voice-input/ComposerDictationControl";
-import { VOICE_WAVEFORM_SAMPLE_COUNT } from "../voice-input/voiceInputMetering";
 import { alertReadAloudError } from "./ReadAloudButton";
 import { readAloudController } from "./playback";
 import { getReadAloudAway, scrollToReadAloud, subscribeReadAloudAway } from "./readAloudFollow";
 
 /** The settings schema caps read-aloud speed at 1.5. */
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
-const SILENT_LEVELS: ReadonlyArray<number> = Array<number>(VOICE_WAVEFORM_SAMPLE_COUNT).fill(0);
+// The same meter as web's player: newest level on the right, bars resting at a fifth.
+const WAVEFORM_BAR_COUNT = 24;
+const WAVEFORM_HEIGHT = 16;
+const WAVEFORM_REST_SCALE = 0.2;
+const WAVEFORM_TIMING = { duration: 100, easing: Easing.out(Easing.quad) };
+const WAVEFORM_BAR_IDS = Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => String(index));
+const SILENT_LEVELS: ReadonlyArray<number> = Array<number>(WAVEFORM_BAR_COUNT).fill(0);
 const BAR_SHAPE = { borderRadius: 22, borderCurve: "circular", overflow: "hidden" } as const;
 
 /**
@@ -89,9 +102,8 @@ function ReadAloudBarControls(props: {
       <View
         accessibilityRole="toolbar"
         accessibilityLabel={gt("Read aloud")}
-        className="h-11 flex-row items-center px-1"
+        className="h-11 flex-row items-center"
       >
-        {/* Matches desktop: pause or play on the left; jump, waveform, speed and stop on the right. */}
         {status === "loading" ? (
           <View
             accessible
@@ -111,12 +123,13 @@ function ReadAloudBarControls(props: {
             }}
           />
         )}
-        <View className="min-w-0 flex-1 flex-row items-center justify-end">
+        {/* What it is doing; the way back to the word read takes its place once scrolled away. */}
+        <View className="min-w-0 flex-1 flex-row items-center">
           {away?.id === id ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={gt("Jump to current")}
-              className="h-11 min-w-0 shrink flex-row items-center gap-1 pl-2 pr-4 active:opacity-70"
+              className="h-11 min-w-0 shrink flex-row items-center gap-1 active:opacity-70"
               onPress={scrollToReadAloud}
             >
               <SymbolView
@@ -126,17 +139,26 @@ function ReadAloudBarControls(props: {
                 type="monochrome"
               />
               <Text
-                className="min-w-0 shrink font-t3-medium text-xs text-foreground"
+                className="min-w-0 shrink font-t3-medium text-sm text-foreground"
                 numberOfLines={1}
               >
                 {gt("Jump to current")}
               </Text>
             </Pressable>
-          ) : null}
+          ) : (
+            <Text
+              className="min-w-0 shrink font-t3-medium text-sm text-foreground"
+              numberOfLines={1}
+            >
+              {status === "loading"
+                ? gt("Preparing to read")
+                : status === "paused"
+                  ? gt("Paused")
+                  : gt("Reading aloud")}
+            </Text>
+          )}
         </View>
-        <View className="h-11 w-11 items-center justify-center">
-          <CompactVoiceWaveform audioLevels={status === "playing" ? levels : silent} />
-        </View>
+        <ReadAloudWaveform levels={status === "playing" ? levels : silent} />
         <Menu
           accessible
           accessibilityRole="button"
@@ -149,10 +171,17 @@ function ReadAloudBarControls(props: {
           }))}
           onPressAction={({ nativeEvent }) => changeSpeed(Number(nativeEvent.event))}
         >
-          <View className="h-11 min-w-11 items-center justify-center px-2">
-            <Text className="font-t3-medium text-sm tabular-nums text-foreground">
+          {/* As wide as the widest speed, so picking one never moves the waveform. */}
+          <View className="h-11 w-17 flex-row items-center justify-end gap-1">
+            <Text className="font-t3-medium text-sm tabular-nums text-foreground-secondary">
               {speedLabel}
             </Text>
+            <SymbolView
+              name="chevron.down"
+              size={10}
+              tintColorClassName="accent-icon-muted"
+              type="monochrome"
+            />
           </View>
         </Menu>
         <BarButton label={gt("Stop reading")} icon="stop.fill" onPress={readAloudController.stop} />
@@ -173,7 +202,55 @@ function BarButton(props: {
       className="h-11 w-11 items-center justify-center active:opacity-70"
       onPress={props.onPress}
     >
-      <SymbolView name={props.icon} size={16} tintColorClassName="accent-icon" type="monochrome" />
+      <SymbolView
+        name={props.icon}
+        size={13}
+        tintColorClassName="accent-foreground-secondary"
+        type="monochrome"
+      />
     </Pressable>
   );
 }
+
+const ReadAloudWaveform = memo(function ReadAloudWaveform(props: {
+  readonly levels: SharedValue<ReadonlyArray<number>>;
+}) {
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      className="h-11 flex-row items-center justify-end gap-0.5"
+    >
+      {WAVEFORM_BAR_IDS.map((id, index) => (
+        <WaveformBar key={id} levels={props.levels} index={index} />
+      ))}
+    </View>
+  );
+});
+
+const WaveformBar = memo(function WaveformBar(props: {
+  readonly levels: SharedValue<ReadonlyArray<number>>;
+  readonly index: number;
+}) {
+  const { levels, index } = props;
+  const reducedMotion = useReducedMotion();
+  const style = useAnimatedStyle(() => {
+    const level = levels.value[index] ?? 0;
+    return {
+      opacity: withTiming(0.3 + level * 0.55, WAVEFORM_TIMING),
+      transform: [
+        {
+          scaleY: reducedMotion
+            ? 0.4
+            : withTiming(Math.max(WAVEFORM_REST_SCALE, level), WAVEFORM_TIMING),
+        },
+      ],
+    };
+  });
+  return (
+    <Animated.View
+      className="w-0.5 rounded-full bg-foreground"
+      style={[{ height: WAVEFORM_HEIGHT }, style]}
+    />
+  );
+});

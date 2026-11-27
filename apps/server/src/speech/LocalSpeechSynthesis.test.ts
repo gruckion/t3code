@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it } from "@effect/vitest";
 import type { SpeechSynthesisRequest } from "@t3tools/contracts";
 import { AUDIO_CPP_ESPEAK_DATA, AUDIO_CPP_VERSION, audioCppRuntime } from "@t3tools/audio-cpp";
+import { WORD_TIMING_MODEL_ID } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
@@ -32,10 +33,12 @@ const worker = vi.hoisted(() => {
     languages: ["en"],
     alive: true,
     stream: async (request, onAudio, onPcm) => {
-      spoken.push(request.text);
+      const text = request.lines.map((line) => line.text).join(" ");
+      spoken.push(text);
       onPcm?.(
         Int16Array.from({ length: 2_400 }, (_, index) => index),
         24_000,
+        { start: 0, end: text.length },
       );
       onAudio(frame);
       onAudio(frame);
@@ -108,11 +111,13 @@ it.effect("counts only the files an install still needs in its download size", (
       Effect.gen(function* () {
         const runtime = audioCppRuntime("darwin", "arm64")!.size;
         const { models } = yield* service.catalog;
-        expect(models.map((model) => [model.id, model.install])).toEqual([
-          ["kokoro-82m", { state: "downloadable", size: runtime + AUDIO_CPP_ESPEAK_DATA.size }],
-          ["supertonic-3", { state: "downloadable", size: runtime }],
-          ["pocket-tts-english", { state: "downloadable", size: runtime + 6_194_424 }],
-        ]);
+        expect(Object.fromEntries(models.map((model) => [model.id, model.install]))).toMatchObject({
+          "kokoro-82m": { state: "downloadable", size: runtime + AUDIO_CPP_ESPEAK_DATA.size },
+          "supertonic-3": { state: "downloadable", size: runtime },
+          "pocket-tts-english": { state: "downloadable", size: runtime + 6_194_424 },
+          // Each language has its own voice files.
+          "pocket-tts-french": { state: "downloadable", size: runtime + 6_244_152 },
+        });
       }),
     { runtime: false },
   ),
@@ -363,3 +368,66 @@ describe("read aloud cache for local models", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+it.effect("keeps eSpeak data and voice clips while another installed model reads them", () =>
+  Effect.gen(function* () {
+    const removed: Array<string> = [];
+    const installed = ["kokoro-82m", "Qwen3-TTS-12Hz-1.7B-Base", "CosyVoice3"];
+    yield* withService(
+      {
+        isReady: (file) =>
+          Effect.succeed(
+            !file.filename.startsWith("Piper") &&
+              !file.filename.startsWith("Qwen3-TTS-12Hz-0.6B") &&
+              (installed.some((name) => file.filename.toLowerCase().includes(name.toLowerCase())) ||
+                file.id === "pingdotgg/audio.cpp"),
+          ),
+        remove: (file) => Effect.sync(() => void removed.push(file.filename)),
+      },
+      (service) =>
+        Effect.gen(function* () {
+          yield* service.remove("piper-lessac");
+          yield* service.remove("qwen3-tts-0.6b");
+          expect(removed).toEqual([
+            "Piper-TTS-GGUF/piper-en-us-lessac-medium-orig.gguf",
+            "Qwen3-TTS-12Hz-0.6B-Base-GGUF/qwen3-tts-12hz-0.6b-base-q8_0.gguf",
+          ]);
+        }),
+    );
+  }),
+);
+
+it.effect(
+  "installs and removes the word timing model like a model, with the runtime it needs",
+  () =>
+    Effect.gen(function* () {
+      const ready = new Set<string>();
+      const removed: Array<string> = [];
+      yield* withService(
+        {
+          isReady: (file) => Effect.sync(() => ready.has(file.filename)),
+          installedPath: (file) =>
+            Effect.sync(() => (ready.has(file.filename) ? `/models/${file.filename}` : undefined)),
+          download: (file) => Effect.sync(() => (ready.add(file.filename), "/unused")),
+          remove: (file) =>
+            Effect.sync(() => {
+              ready.delete(file.filename);
+              removed.push(file.filename);
+            }),
+        },
+        (service) =>
+          Effect.gen(function* () {
+            expect(yield* service.wordTiming).toEqual({ state: "downloadable", size: 205_171_744 });
+            yield* service.download(WORD_TIMING_MODEL_ID);
+            expect(yield* service.wordTiming).toEqual({ state: "installed", size: 205_171_744 });
+            // No installed voice uses the runtime, so removing the model removes it too.
+            yield* service.remove(WORD_TIMING_MODEL_ID);
+            expect(removed).toEqual(["mms-forced-aligner-q4_k.gguf"]);
+            expect(yield* service.wordTiming).toEqual({
+              state: "downloadable",
+              size: 205_171_744 + audioCppRuntime("darwin", "arm64")!.size,
+            });
+          }),
+      );
+    }),
+);

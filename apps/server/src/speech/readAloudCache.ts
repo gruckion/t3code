@@ -204,10 +204,16 @@ function joinSamples(chunks: ReadonlyArray<Int16Array>) {
   return samples;
 }
 
-/** A cached piece as synthesis parts. The PCM goes first, so words it lacks are timed again. */
-export const replayAudio = ({ audio, words, pcm }: CachedAudio) =>
+/**
+ * A cached piece as synthesis parts. The PCM goes first, so words it lacks are timed again; it
+ * speaks `span`, the whole piece text.
+ */
+export const replayAudio = (
+  { audio, words, pcm }: CachedAudio,
+  span: { readonly start: number; readonly end: number },
+) =>
   Stream.fromIterable<SpeechSynthesisPart>([
-    ...(pcm ? [{ pcm: pcm.samples, rate: pcm.rate, startSeconds: 0 }] : []),
+    ...(pcm ? [{ pcm: pcm.samples, rate: pcm.rate, startSeconds: 0, span }] : []),
     ...(words.length ? [{ words }] : []),
     audio,
   ]);

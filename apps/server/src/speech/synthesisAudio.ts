@@ -28,12 +28,18 @@ export function mp3Kbps(sampleRate: number) {
   return sampleRate > 32000 ? 64 : 48;
 }
 /**
- * The lines of read-aloud text, one sentence or block each, spoken one at a time as Kokoro's
- * reference pipeline splits them, so the first arrives before the model reaches the rest.
- * Self-contained so the synthesis worker can inline it.
+ * The sentences of `text`'s lines, and where each sits in `text`. Each is spoken and timed on its
+ * own, so its first audio comes sooner and its words are timed once it is said, not its paragraph.
  */
-export function speechLines(text: string) {
-  return text.split(/\n+/).filter((line) => line.trim());
+export function speechSentenceSpans(text: string) {
+  const sentences = new Intl.Segmenter(undefined, { granularity: "sentence" });
+  return [...text.matchAll(/[^\n]+/g)].flatMap((line) =>
+    [...sentences.segment(line[0])].flatMap(({ segment, index }) => {
+      const sentence = segment.trim();
+      const start = line.index + index + segment.length - segment.trimStart().length;
+      return sentence ? [{ text: sentence, start, end: start + sentence.length }] : [];
+    }),
+  );
 }
 
 /**
@@ -114,6 +120,91 @@ function isEncodablePcm(pcm: Uint8Array, rate: number, channels: number) {
 }
 
 /** Whether MP3 can carry PCM at this rate and channel count unchanged. */
+/**
+ * The samples of a 16-bit PCM WAV, such as a voice clip. The synthesis worker inlines it, so it
+ * references nothing outside itself.
+ */
+export function wavAudio(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let channels = 0;
+  let sampleRate = 0;
+  let bits = 0;
+  for (let at = 12; at + 8 <= bytes.length;) {
+    const id = String.fromCharCode(...bytes.subarray(at, at + 4));
+    const size = view.getUint32(at + 4, true);
+    if (id === "fmt ") {
+      channels = view.getUint16(at + 10, true);
+      sampleRate = view.getUint32(at + 12, true);
+      bits = view.getUint16(at + 22, true);
+    } else if (id === "data") {
+      if (bits !== 16 || !channels) throw new Error("Voice clips must be 16-bit PCM WAV.");
+      const samples = new Float32Array(Math.floor(Math.min(size, bytes.length - at - 8) / 2));
+      for (let index = 0; index < samples.length; index++)
+        samples[index] = view.getInt16(at + 8 + index * 2, true) / 0x8000;
+      return { samples, sampleRate, channels };
+    }
+    at += 8 + size + (size & 1);
+  }
+  throw new Error("The voice clip has no audio.");
+}
+
+/**
+ * Turns down peaks above `ceiling` smoothly instead of clipping them, which sounds like a pop.
+ * Several local models overshoot full scale, most of all at the start of a call. It holds back
+ * the last few milliseconds of each part to see the peaks ahead, so call `flush` after the last
+ * part of a reply. The synthesis worker inlines it, so it references nothing outside itself.
+ */
+export function peakLimiter(sampleRate: number, channels: number, ceiling = 0.89) {
+  const span = Math.max(1, Math.round(sampleRate * 0.005));
+  const release = 1 - Math.exp(-1 / (sampleRate * 0.15));
+  // Starts with a span of silence, so even a peak at the very start ramps down in time.
+  let held = new Float32Array(span * channels);
+  // The targets of the last frames out, so a ramp continues across parts.
+  let recent: number[] = Array.from({ length: span }, () => 1);
+  let gain = 1;
+  const run = (input: Float32Array, final: boolean) => {
+    const samples = new Float32Array(held.length + input.length);
+    samples.set(held);
+    samples.set(input, held.length);
+    const frames = Math.floor(samples.length / channels);
+    const ready = final ? frames : Math.max(0, frames - span);
+    const needed = new Float32Array(frames);
+    for (let frame = 0; frame < frames; frame++) {
+      let peak = 0;
+      for (let channel = 0; channel < channels; channel++)
+        peak = Math.max(peak, Math.abs(samples[frame * channels + channel]! || 0));
+      needed[frame] = peak > ceiling ? ceiling / peak : 1;
+    }
+    // Each frame's target is the lowest gain due within the next span; averaging the targets
+    // over the last span ramps the gain down to each peak's by the time the peak plays.
+    const ahead = new Float32Array(frames);
+    const window: number[] = [];
+    for (let frame = frames - 1; frame >= 0; frame--) {
+      while (window.length && needed[window.at(-1)!]! >= needed[frame]!) window.pop();
+      window.push(frame);
+      if (window[0]! >= frame + span) window.shift();
+      ahead[frame] = needed[window[0]!]!;
+    }
+    const targets = [...recent, ...ahead.subarray(0, ready)];
+    let sum = recent.reduce((total, target) => total + target, 0);
+    const out = new Float32Array(ready * channels);
+    for (let frame = 0; frame < ready; frame++) {
+      sum += targets[span + frame]! - targets[frame]!;
+      const ramp = sum / span;
+      gain = ramp < gain ? ramp : gain + (ramp - gain) * release;
+      for (let channel = 0; channel < channels; channel++)
+        out[frame * channels + channel] = samples[frame * channels + channel]! * gain;
+    }
+    recent = targets.slice(ready);
+    held = samples.slice(ready * channels);
+    return out;
+  };
+  return {
+    limit: (samples: Float32Array) => run(samples, false),
+    flush: () => run(new Float32Array(0), true),
+  };
+}
+
 export function isEncodableFormat(rate: number, channels: number) {
   return MP3_SAMPLE_RATES.includes(rate) && (channels === 1 || channels === 2);
 }

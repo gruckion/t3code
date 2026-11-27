@@ -6,6 +6,7 @@ import {
   readAloudBlockFrom,
   readAloudSpeech,
   readAloudText,
+  readAloudSentenceStart,
   splitReadAloudSpans,
   splitReadAloudText,
   spokenWordAt,
@@ -30,7 +31,7 @@ it("never reads diagram source, and reads formulas as the words it is given for 
 
   const markdown = "Area is $\\pi r^2$ here.\n\n$$\n\\frac{a}{b}\n$$\n\nCosts $5 or $10.";
   const words: Record<string, string> = { "\\pi r^2": "pi r squared", "\\frac{a}{b}": "a over b" };
-  const speech = readAloudSpeech(markdown, true, (tex) => words[tex]);
+  const speech = readAloudSpeech(markdown, true, { math: (tex) => words[tex] });
   expect(speech.text).toBe("Area is pi r squared here.\na over b.\nCosts $5 or $10.");
   // The words stand for the formula, so they map back into its source.
   const squared = speech.text.indexOf("squared");
@@ -39,6 +40,46 @@ it("never reads diagram source, and reads formulas as the words it is given for 
   expect(speech.sources[squared]).toBeLessThan(markdown.indexOf(" here"));
   // Without a reader, formulas read as the TeX the reply shows.
   expect(readAloudText(markdown, true)).toContain("$\\pi r^2$");
+});
+
+it("reads file chips as they show, and bare addresses as a person would say them", () => {
+  expect(
+    readAloudText(
+      "Open `apps/server/src/SpeechAligner.ts:120`, [`a.ts:4`](/repo/a.ts#L4), `b.ts:10-20`, and [the reader](src/reader.ts).",
+      true,
+    ),
+  ).toBe("Open SpeechAligner.ts line 120, a.ts line 4, b.ts lines 10 to 20, and the reader.");
+  expect(
+    readAloudText(
+      [
+        "https://github.com/pingdotgg/t3code/pull/35910",
+        "https://github.com/pingdotgg/t3code/commit/7ff4ccb5231f9e0a8d6c4b2e1f0a9b8c7d6e5f4a",
+        "https://github.com/pingdotgg/t3code/blob/main/apps/web/src/index.css#L4",
+        "https://gitlab.com/group/sub/proj/-/merge_requests/7",
+        "<https://t3.codes/docs>",
+        "https://example.com/api/v2/users?filter=active",
+        "[labeled](https://example.com/a/b/c)",
+      ].join(", "),
+      true,
+    ),
+  ).toBe(
+    "t3code pull request 35910, t3code commit 7ff4ccb, index.css in t3code, proj merge request 7, t3.codes/docs, example.com, labeled.",
+  );
+});
+
+it("reads shortcut symbols as key names, leaving arrows in prose to the voice", () => {
+  expect(readAloudText("Press ⌘K or `⌥⇧↓`, then ⎋. A → B.", true)).toBe(
+    "Press Command K or Option Shift Down, then Escape. A → B.",
+  );
+});
+
+it("reads emoji by the names it is given, mapped back to the emoji", () => {
+  const markdown = "Done 🎉, all pass 👍.";
+  const names: Record<string, string> = { "🎉": "party popper", "👍": "thumbs up" };
+  const speech = readAloudSpeech(markdown, true, { emoji: (emoji) => names[emoji] });
+  expect(speech.text).toBe("Done party popper, all pass thumbs up.");
+  expect(speech.sources[speech.text.indexOf("popper")]).toBe(markdown.indexOf("🎉") + 1);
+  expect(readAloudText(markdown, true)).toBe(markdown);
 });
 
 it("ends every heading, list item, and table row as its own sentence", () => {
@@ -120,6 +161,34 @@ it("locates a spoken word by markdown range and by its repeats in the block", ()
     start: speech.text.indexOf("saw"),
     end: speech.text.indexOf("saw") + 3,
   });
+});
+
+it("leaves rendered formulas out of the cues a renderer searches its text for", () => {
+  const markdown = "Predict the start of word $i$.";
+  const math = (tex: string) => (tex === "i" ? "i" : undefined);
+  const speech = readAloudSpeech(markdown, true, { math });
+  const formula = speech.text.lastIndexOf("i");
+  const position = readAloudPosition(speech, formula, formula + 1);
+  // The rendered paragraph's text ends "word ." since the formula shows as math.
+  expect(position?.block.last).toEqual({ text: ".", occurrence: 0 });
+  expect(position?.word.cue).toBeNull();
+  // Shown as TeX without math rendering, the formula is text like any other.
+  const plain = readAloudSpeech(markdown, true);
+  const tex = plain.text.indexOf("$i$");
+  expect(readAloudPosition(plain, tex, tex + 3)?.word.cue).toEqual({ text: "$i$", occurrence: 0 });
+});
+
+it("places words spoken for a block formula, which shows no text a renderer can search", () => {
+  const markdown = "Euler wrote:\n\n$$\ne^{i\\pi} + 1 = 0\n$$\n\nAnd that was that.";
+  const math = () => "e to the i pi plus one equals zero";
+  const speech = readAloudSpeech(markdown, true, { math });
+  const plus = speech.text.indexOf("plus");
+  const position = readAloudPosition(speech, plus, plus + 4);
+  const formula = { start: markdown.indexOf("$$"), end: markdown.lastIndexOf("$$") + 2 };
+  expect(position?.block).toMatchObject({ ...formula, first: null, last: null });
+  expect(position?.word.cue).toBeNull();
+  expect(position?.word.start).toBeGreaterThanOrEqual(formula.start);
+  expect(position?.word.end).toBeLessThanOrEqual(formula.end);
 });
 
 it("finds the block and word being read in text a renderer shows", () => {
@@ -205,4 +274,13 @@ it("splits long replies without losing content or cutting surrogate pairs", () =
   const padded = `  ${text}\n`;
   for (const span of splitReadAloudSpans(padded, 20))
     expect(padded.slice(span.start, span.start + span.text.length)).toBe(span.text);
+});
+
+it("picks speech up from the start of a word's sentence, unless that runs too long", () => {
+  const text = "Done.\nReads the manifest first. Streams a terminal result.";
+  expect(readAloudSentenceStart(text, text.indexOf("terminal"))).toBe(text.indexOf("Streams"));
+  expect(readAloudSentenceStart(text, text.indexOf("manifest"))).toBe(text.indexOf("Reads"));
+  expect(readAloudSentenceStart(text, 2)).toBe(0);
+  const long = `${"word ".repeat(100)}end`;
+  expect(readAloudSentenceStart(long, long.indexOf("end"))).toBe(long.indexOf("end"));
 });

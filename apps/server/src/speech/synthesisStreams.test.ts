@@ -98,27 +98,30 @@ it.effect("times PCM-only audio with the aligner and ends timings once it has fi
     );
     const word = (start: number) => ({ start, end: start + 4, startSeconds: start, endSeconds: 1 });
     const finishing = yield* Deferred.make<void>();
-    const pushed: Array<{ readonly rate: number; readonly startSeconds: number }> = [];
+    const pushed: SpeechAligner.AlignmentAudio[] = [];
     const session = vi.fn(() =>
       Effect.succeed({
-        push: (_pcm: Int16Array, rate: number, startSeconds: number) =>
+        push: (part: SpeechAligner.AlignmentAudio) =>
           Effect.sync(() => {
-            pushed.push({ rate, startSeconds });
+            pushed.push(part);
             return [word(0)];
           }),
-        finish: () => Deferred.await(finishing).pipe(Effect.as([word(5)])),
+        finish: Deferred.await(finishing).pipe(Effect.as([word(5)])),
       }),
     );
     yield* Effect.gen(function* () {
       const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
-      yield* Queue.offerAll(source, [
-        { pcm: new Int16Array(4), rate: 24_000, startSeconds: 0.5 },
-        frame,
-      ]);
-      const token = yield* streams.start("xai", { ...request, alignment: "multilingual" });
+      const part = {
+        pcm: new Int16Array(4),
+        rate: 24_000,
+        startSeconds: 0.5,
+        span: { start: 0, end: request.text.length },
+      };
+      yield* Queue.offerAll(source, [part, frame]);
+      const token = yield* streams.start("xai", request);
       expect(yield* streams.timings(token, 0)).toEqual({ words: [word(0)], done: false });
-      expect(session).toHaveBeenCalledWith(request.text, "en", "multilingual");
-      expect(pushed).toEqual([{ rate: 24_000, startSeconds: 0.5 }]);
+      expect(session).toHaveBeenCalledWith(request.text, "en");
+      expect(pushed).toEqual([part]);
       yield* Queue.end(source);
       // Synthesis has ended, but the last words are still being timed.
       const waiting = yield* Effect.forkChild(streams.timings(token, 1));
@@ -134,7 +137,107 @@ it.effect("times PCM-only audio with the aligner and ends timings once it has fi
   }),
 );
 
-it.effect("answers loudness levels in batches only to reads that ask for them", () =>
+it.effect("starts audio picked up mid-sentence at its word, keeping the lead-in for context", () =>
+  Effect.gen(function* () {
+    const source = yield* Queue.unbounded<
+      CloudSpeech.SpeechSynthesisPart,
+      SpeechSynthesisError | Cause.Done
+    >();
+    // MPEG-1 Layer III frames at 64 kbps and 44.1 kHz, each marked with its index.
+    const frameSeconds = 1152 / 44100;
+    const frame = (marker: number) =>
+      Uint8Array.from({ length: 208 }, (_, index) =>
+        index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : index === 3 ? marker : 0,
+      );
+    const frames = [0, 1, 2, 3].map(frame);
+    yield* Effect.gen(function* () {
+      const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
+      // "Read this reply." picked up at "this".
+      yield* Queue.offerAll(source, [
+        { words: [{ start: 0, end: 4, startSeconds: 0, endSeconds: 0.05 }] },
+        ...frames,
+        {
+          words: [
+            { start: 5, end: 9, startSeconds: 0.04, endSeconds: 0.12 },
+            { start: 10, end: 16, startSeconds: 0.12, endSeconds: 0.2 },
+          ],
+        },
+      ]);
+      const token = yield* streams.start("elevenlabs", { ...request, from: 5 });
+      yield* Queue.end(source);
+      // The frame the word starts in is the second, so audio starts there.
+      expect(yield* audio(yield* streams.read(token))).toEqual(
+        frames.slice(1).flatMap((bytes) => [...bytes]),
+      );
+      const cut = frameSeconds;
+      const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
+      expect(yield* streams.timings(token, 0)).toEqual({
+        words: [
+          { start: 5, end: 9, startSeconds: round(0.04 - cut), endSeconds: round(0.12 - cut) },
+          { start: 10, end: 16, startSeconds: round(0.12 - cut), endSeconds: round(0.2 - cut) },
+        ],
+        done: true,
+        durationSeconds: 3 * frameSeconds,
+      });
+    }).pipe(Effect.provide(withSource(Stream.fromQueue(source))));
+  }),
+);
+
+it.effect("reports the loudness of PCM audio on the MP3's clock, shifted with a lead-in", () =>
+  Effect.gen(function* () {
+    const rate = 15_000;
+    // A tenth of a second of silence, then a tenth at full scale, starting one second in.
+    const pcm = Int16Array.from({ length: 3_000 }, (_, index) =>
+      index < 1_500 ? 0 : index % 2 ? 0x7fff : -0x7fff,
+    );
+    const frame = Uint8Array.from({ length: 208 }, (_, index) =>
+      index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : 0,
+    );
+    const part = { pcm, rate, startSeconds: 1, span: { start: 0, end: request.text.length } };
+    const delay = 1105 / rate;
+    const reading = (from?: number) =>
+      Effect.gen(function* () {
+        const source = yield* Queue.unbounded<
+          CloudSpeech.SpeechSynthesisPart,
+          SpeechSynthesisError | Cause.Done
+        >();
+        // "this" is timed at the start of the second frame, so a lead-in is cut there.
+        const session = () =>
+          Effect.succeed({
+            push: () => Effect.succeed([]),
+            finish: Effect.succeed([
+              { start: 5, end: 9, startSeconds: 1152 / 44100, endSeconds: 1 },
+            ]),
+          });
+        return yield* Effect.gen(function* () {
+          const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
+          yield* Queue.offerAll(source, [part, frame, frame]);
+          yield* Queue.end(source);
+          const token = yield* streams.start("xai", {
+            ...request,
+            ...(from === undefined ? {} : { from }),
+          });
+          yield* Stream.runDrain((yield* streams.read(token))!);
+          // Word timings alone answer without levels; asking for levels after one skips it.
+          expect((yield* streams.timings(token, 0)).levels).toBeUndefined();
+          const all = (yield* streams.timings(token, 0, 0)).levels!;
+          expect((yield* streams.timings(token, 0, 1)).levels).toEqual(all.slice(1));
+          return all;
+        }).pipe(Effect.provide(withSource(Stream.fromQueue(source), { session })));
+      });
+    const levels = yield* reading();
+    expect(levels.map((level) => level.level)).toEqual([0, 0, 1, 1]);
+    expect(levels[0]!.seconds).toBeCloseTo(1 + delay + 0.025, 3);
+    // From "this", the audio starts at its frame and the levels before it are dropped.
+    const cut = 1152 / 44100;
+    const shifted = yield* reading(5);
+    expect(shifted.map((level) => level.seconds)).toEqual(
+      levels.map((level) => Math.round((level.seconds - cut) * 1000) / 1000),
+    );
+  }),
+);
+
+it.effect("plays the lead-in at once when no model can time the word picked", () =>
   Effect.gen(function* () {
     const source = yield* Queue.unbounded<
       CloudSpeech.SpeechSynthesisPart,
@@ -143,28 +246,17 @@ it.effect("answers loudness levels in batches only to reads that ask for them", 
     const frame = Uint8Array.from({ length: 208 }, (_, index) =>
       index === 0 ? 0xff : index === 1 ? 0xfb : index === 2 ? 0x50 : 0,
     );
-    // Three seconds at full scale, then the encoder's last second of silence.
-    const loud = new Int16Array(3 * 24_000).fill(0x4000);
     yield* Effect.gen(function* () {
       const streams = yield* SpeechSynthesisStreams.SpeechSynthesisStreams;
-      yield* Queue.offerAll(source, [{ pcm: loud, rate: 24_000, startSeconds: 0 }, frame]);
-      const token = yield* streams.start("xai", request);
-      const first = yield* streams.timings(token, 0, 0);
-      expect(first.levels?.windowSeconds).toBe(0.05);
-      expect(first.levels?.start).toBe(0);
-      expect(first.levels?.values.slice(1)).toEqual(Array(59).fill(20));
-      const waiting = yield* Effect.forkChild(streams.timings(token, 0, 60));
-      yield* Queue.offer(source, { pcm: new Int16Array(24_000), rate: 24_000, startSeconds: 3 });
+      yield* Queue.offerAll(source, [
+        { pcm: new Int16Array(4), rate: 24_000, startSeconds: 0, span: { start: 0, end: 16 } },
+        frame,
+      ]);
+      // Starts while synthesis is still running, rather than holding audio until it ends.
+      const token = yield* streams.start("xai", { ...request, from: 5 });
+      yield* Queue.offer(source, frame);
       yield* Queue.end(source);
-      const last = yield* Fiber.join(waiting);
-      expect(last.levels?.start).toBe(60);
-      expect(last.levels?.values.at(-1)).toBe(0);
-      // Reads that do not ask, such as the web player's, get words alone.
-      expect(yield* streams.timings(token, 0)).toEqual({
-        words: [],
-        done: true,
-        durationSeconds: 1152 / 44100,
-      });
+      expect(yield* audio(yield* streams.read(token))).toEqual([...frame, ...frame]);
     }).pipe(
       Effect.provide(withSource(Stream.fromQueue(source), { session: () => Effect.undefined })),
     );

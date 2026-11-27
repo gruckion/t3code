@@ -1,28 +1,39 @@
-import type { SpeechSynthesisWord } from "@t3tools/contracts";
+import type { SpeechSynthesisLevel, SpeechSynthesisWord } from "@t3tools/contracts";
+import { READ_ALOUD_LEVEL_INTERVAL_MS, readAloudLevel } from "@t3tools/shared/read-aloud";
+
+/** Players keep lame's encoder delay at the start of each MP3 stream the PCM becomes. */
+export const MP3_ENCODER_DELAY_SAMPLES = 1105;
+/**
+ * The loudness of mono 16-bit PCM that starts `startSeconds` into its audio, a level for each
+ * meter interval on the scale players that measure their own audio use.
+ */
+export function speechLevels(
+  pcm: Int16Array,
+  rate: number,
+  startSeconds: number,
+): SpeechSynthesisLevel[] {
+  const window = Math.max(1, Math.round((rate * READ_ALOUD_LEVEL_INTERVAL_MS) / 1000));
+  const levels: SpeechSynthesisLevel[] = [];
+  for (let start = 0; start < pcm.length; start += window) {
+    const end = Math.min(pcm.length, start + window);
+    let sum = 0;
+    for (let index = start; index < end; index++) sum += (pcm[index]! / 0x8000) ** 2;
+    levels.push({
+      seconds: Math.round((startSeconds + (start + end) / 2 / rate) * 1000) / 1000,
+      level: Math.round(readAloudLevel(sum / (end - start)) * 100) / 100,
+    });
+  }
+  return levels;
+}
 
 const MPEG1_LAYER3_KBPS = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
 const MPEG2_LAYER3_KBPS = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
 const MPEG1_RATES = [44100, 48000, 32000];
 
-export type Mp3Frame = {
-  readonly length: number;
-  readonly seconds: number;
-  readonly mpeg1: boolean;
-  readonly channels: 1 | 2;
-  /** A 16-bit CRC follows the header, before the side information. */
-  readonly crc: boolean;
-};
-
-/** Layer III frame at `at`, or undefined when no frame header starts there. */
-function frameAt(bytes: Uint8Array, at: number): Mp3Frame | undefined {
-  const [sync, flags, info, mode] = [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]];
-  if (
-    sync !== 0xff ||
-    flags === undefined ||
-    info === undefined ||
-    mode === undefined ||
-    (flags & 0xe0) !== 0xe0
-  )
+/** Layer III frame length and duration at `at`, or undefined when no frame header starts there. */
+function frameAt(bytes: Uint8Array, at: number) {
+  const [sync, flags, info] = [bytes[at], bytes[at + 1], bytes[at + 2]];
+  if (sync !== 0xff || flags === undefined || info === undefined || (flags & 0xe0) !== 0xe0)
     return undefined;
   const version = (flags >> 3) & 3;
   if (version === 1 || ((flags >> 1) & 3) !== 1) return undefined;
@@ -35,19 +46,39 @@ function frameAt(bytes: Uint8Array, at: number): Mp3Frame | undefined {
   return {
     length: Math.floor(((samples / 8) * kbps * 1000) / rate) + ((info >> 1) & 1),
     seconds: samples / rate,
-    mpeg1,
-    channels: mode >> 6 === 3 ? 1 : 2,
-    crc: (flags & 1) === 0,
   };
 }
 
 /**
- * Calls `onFrame` with each whole MP3 frame of a stream as chunks arrive, and the seconds of
- * audio before it, skipping a leading ID3v2 tag and bytes between frames.
+ * The frame of an MP3 stream that plays at `seconds`: its byte offset and when it starts, or
+ * undefined until `bytes` reach it. Audio cut there decodes from a frame boundary.
  */
-export function mp3Frames(
-  onFrame: (bytes: Uint8Array, frame: Mp3Frame, startSeconds: number) => void = () => {},
-) {
+export function mp3FrameAt(bytes: Uint8Array, seconds: number) {
+  // An ID3v2 tag holds metadata, not audio; its size is four 7-bit bytes.
+  let at =
+    bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33 && bytes.length >= 10
+      ? 10 + ((bytes[6]! << 21) | (bytes[7]! << 14) | (bytes[8]! << 7) | bytes[9]!)
+      : 0;
+  let elapsed = 0;
+  while (at + 4 <= bytes.length) {
+    const frame = frameAt(bytes, at);
+    if (!frame) {
+      at++;
+      continue;
+    }
+    if (at + frame.length > bytes.length) return undefined;
+    if (elapsed + frame.seconds > seconds) return { offset: at, seconds: elapsed };
+    elapsed += frame.seconds;
+    at += frame.length;
+  }
+  return undefined;
+}
+
+/**
+ * Counts the playing time of an MP3 stream from its frame headers as chunks arrive. Word timings
+ * of later synthesis pieces start where the earlier pieces' audio ends.
+ */
+export function mp3Duration() {
   let carry = new Uint8Array(0);
   let skip = 0;
   let started = false;
@@ -78,7 +109,6 @@ export function mp3Frames(
           continue;
         }
         if (at + frame.length > bytes.length) break;
-        onFrame(bytes.subarray(at, at + frame.length), frame, seconds);
         seconds += frame.seconds;
         at += frame.length;
       }
@@ -89,12 +119,6 @@ export function mp3Frames(
     },
   };
 }
-
-/**
- * Counts the playing time of an MP3 stream from its frame headers as chunks arrive. Word timings
- * of later synthesis pieces start where the earlier pieces' audio ends.
- */
-export const mp3Duration = () => mp3Frames();
 
 export interface CharacterAlignment {
   readonly characters: ReadonlyArray<string>;

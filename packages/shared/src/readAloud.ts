@@ -3,12 +3,19 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import { mayContainMath, parseMarkdownWithMath } from "./markdownMath.ts";
+import {
+  inlineCodeFilePathCandidate,
+  isMarkdownFileLinkLabel,
+  parseMarkdownFileLink,
+} from "./markdownLinks.ts";
+import { fileBasename } from "./path.ts";
 
 const parser = unified().use(remarkParse).use(remarkGfm);
 
 // Already ends a sentence, allowing closing quotes or brackets after the punctuation.
 const SENTENCE_END = /[.!?…:;。！？：；]["'”’)\]]*$/u;
 const SPACE = /\s/;
+const PAUSE = /[,.;:!?…]/;
 
 /** Marks a spoken character that the markdown does not contain, such as an added full stop. */
 const ADDED = -1;
@@ -28,6 +35,8 @@ export interface ReadAloudSpeech {
   /** The markdown offset of each UTF-16 unit of `text`, or -1 for punctuation added for speech. */
   readonly sources: ReadonlyArray<number>;
   readonly blocks: ReadonlyArray<ReadAloudBlock>;
+  /** Markdown ranges of formulas read as words; renderers show them as math, not as text. */
+  readonly formulas: ReadonlyArray<{ readonly start: number; readonly end: number }>;
 }
 
 type Run = { text: string; sources: number[] };
@@ -99,20 +108,137 @@ function cellMarkdown(markdown: string, cell: Positioned) {
 /** Words for a TeX formula, or undefined to read its source. */
 export type SpeakMath = (tex: string) => string | undefined;
 
+/** Words for an emoji, or undefined to leave it to the voice. */
+export type SpeakEmoji = (emoji: string) => string | undefined;
+
+/** Words for what a reply shows as something other than text. */
+export interface ReadAloudWords {
+  readonly math?: SpeakMath | undefined;
+  readonly emoji?: SpeakEmoji | undefined;
+}
+
+const EMOJI =
+  /\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3|\p{Extended_Pictographic}[\uFE0F\p{Emoji_Modifier}]*(?:\u200D\p{Extended_Pictographic}[\uFE0F\p{Emoji_Modifier}]*)*/gu;
+
+/** Says each match of `pattern` that `wordsFor` has words for, spread over the match's source. */
+function sayAs(run: Run, pattern: RegExp, wordsFor: (match: string) => string | undefined): Run {
+  const parts: Run[] = [];
+  let from = 0;
+  for (const match of run.text.matchAll(pattern)) {
+    const said = wordsFor(match[0]);
+    if (!said) continue;
+    const words = ` ${said} `;
+    const sources = run.sources.slice(match.index, match.index + match[0].length);
+    parts.push(
+      { text: run.text.slice(from, match.index), sources: run.sources.slice(from, match.index) },
+      {
+        text: words,
+        sources: Array.from(
+          words,
+          (_, index) => sources[Math.floor((index * sources.length) / words.length)] ?? ADDED,
+        ),
+      },
+    );
+    from = match.index + match[0].length;
+  }
+  if (!parts.length) return run;
+  parts.push({ text: run.text.slice(from), sources: run.sources.slice(from) });
+  return concat(parts);
+}
+
+// Apple's names for the key symbols in shortcuts such as ⌘K or ⌥⇧↓.
+const KEY_NAMES: Record<string, string> = {
+  "⌘": "Command",
+  "⌥": "Option",
+  "⇧": "Shift",
+  "⌃": "Control",
+  "⎋": "Escape",
+  "⏎": "Return",
+  "↵": "Return",
+  "⌫": "Delete",
+  "⌦": "Forward Delete",
+  "⇥": "Tab",
+  "↑": "Up",
+  "↓": "Down",
+  "←": "Left",
+  "→": "Right",
+};
+// An arrow is a key only after a modifier; elsewhere, as in "a → b", the voice reads it.
+const KEYS = /[⌘⌥⇧⌃]+[↑↓←→]?|[⎋⏎↵⌫⌦⇥]/gu;
+const sayKeys = (keys: string) => Array.from(keys, (key) => KEY_NAMES[key]).join(" ");
+
+/** What a file chip shows, as words: its file name and lines. */
+function spokenFile(href: string) {
+  const file = parseMarkdownFileLink(href);
+  if (!file) return undefined;
+  const name = fileBasename(file.path).normalize("NFC");
+  if (file.line === undefined) return name;
+  return file.endLine === undefined
+    ? `${name} line ${file.line}`
+    : `${name} lines ${file.line} to ${file.endLine}`;
+}
+
+const WEB_URL = /^https?:\/\/(?:[^@/?#]*@)?([^/?#:]+)(?::\d+)?([^?#]*)([?#].*)?$/i;
+// A host and one short path segment, such as `t3.codes/docs`, is read whole.
+const SHORT_URL = 32;
+
+/** A bare web address as words: a place on a code host, a short address, or else its host. */
+function spokenUrl(href: string) {
+  const match = WEB_URL.exec(href);
+  if (!match?.[1]) return href;
+  const host = match[1].toLowerCase().replace(/^www\./, "");
+  const path = (match[2] ?? "").split("/").filter(Boolean);
+  const short = [host, ...path].join("/");
+  return (
+    sourceControlPlace(host, path) ??
+    (!match[3] && path.length <= 1 && short.length <= SHORT_URL ? short : host)
+  );
+}
+
+function sourceControlPlace(host: string, path: ReadonlyArray<string>) {
+  const site = host === "github.com" ? "GitHub" : host === "gitlab.com" ? "GitLab" : undefined;
+  if (!site || path.length === 0) return undefined;
+  // GitLab nests groups, and puts `-` between a project and its pages.
+  const dash = site === "GitLab" ? path.indexOf("-") : -1;
+  const project = dash > 0 ? path.slice(0, dash) : site === "GitLab" ? path : path.slice(0, 2);
+  const [kind, id, ...rest] = dash > 0 ? path.slice(dash + 1) : path.slice(project.length);
+  const repo = project.at(-1);
+  if (kind === "pull" && id) return `${repo} pull request ${id}`;
+  if (kind === "merge_requests" && id) return `${repo} merge request ${id}`;
+  if (kind === "issues" && id) return `${repo} issue ${id}`;
+  if (kind === "commit" && id) return `${repo} commit ${id.slice(0, 7)}`;
+  if (kind === "blob" && rest.length) return `${rest.at(-1)} in ${repo}`;
+  return `${repo} on ${site}`;
+}
+
+const nodeText = (node: RootContent): string =>
+  "children" in node ? node.children.map(nodeText).join("") : "value" in node ? node.value : "";
+
 /**
  * Plain text with one sentence per line, and where each spoken character came from in the
  * markdown. Speech engines read newlines as spaces, so every heading, paragraph, list item, and
- * table row ends in punctuation to keep its pause. With `speakMath`, for replies that render
+ * table row ends in punctuation to keep its pause. With `words.math`, for replies that render
  * formulas, each formula is read as its words; without it, as the text the reply shows.
  */
 export function readAloudSpeech(
   markdown: string,
   skipCodeBlocks: boolean,
-  speakMath?: SpeakMath,
+  words: ReadAloudWords = {},
 ): ReadAloudSpeech {
+  const speakMath = words.math;
   let text = "";
   const sources: number[] = [];
   const blocks: ReadAloudBlock[] = [];
+  const formulas: Array<{ start: number; end: number }> = [];
+  // The formula's words, noting where it is when they replace what the reply shows.
+  const formula = (tex: string, node: Positioned) => {
+    const spoken = speakMath?.(tex);
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (spoken !== undefined && start !== undefined && end !== undefined)
+      formulas.push({ start, end });
+    return spoken ?? tex;
+  };
   const push = (run: Run) => {
     text += run.text;
     sources.push(...run.sources);
@@ -128,6 +254,12 @@ export function readAloudSpeech(
         const character = run.text.charAt(index);
         const space = SPACE.test(character);
         if (space && line.text.endsWith(" ")) continue;
+        // Words put in for an emoji or address are padded with spaces; none goes before a comma.
+        const next = index + 1 < lineEnd ? run.text.charAt(index + 1) : " ";
+        if (PAUSE.test(character) && SPACE.test(next) && line.text.endsWith(" ")) {
+          line.text = line.text.slice(0, -1);
+          line.sources.pop();
+        }
         line.text += space ? " " : character;
         line.sources.push(run.sources[index] ?? ADDED);
       }
@@ -155,9 +287,27 @@ export function readAloudSpeech(
     if (node.type === "break") return added("\n");
     if (node.type === "html" || node.type === "image" || node.type === "imageReference")
       return added("");
-    if (node.type === "inlineMath")
-      return spread(` ${speakMath?.(node.value) ?? node.value} `, node);
+    if (node.type === "inlineMath") return spread(` ${formula(node.value, node)} `, node);
+    // Files show as chips and bare addresses in full; both are read the way a person would say them.
+    if (node.type === "inlineCode") {
+      const path = inlineCodeFilePathCandidate(node.value);
+      const file = path ? spokenFile(path) : undefined;
+      if (file) return spread(file, node);
+    }
+    if (node.type === "link") {
+      const label = nodeText(node);
+      const file = isMarkdownFileLinkLabel(label, node.url) ? spokenFile(node.url) : undefined;
+      if (file) return spread(file, node);
+      const bare =
+        WEB_URL.test(node.url) && [label, `http://${label}`, `https://${label}`].includes(node.url);
+      if (bare) return spread(` ${spokenUrl(node.url)} `, node);
+    }
     if ("children" in node) return concat(node.children.map(inline));
+    if (node.type === "text" || node.type === "inlineCode") {
+      const keys = sayAs(located(markdown, node.value, node), KEYS, sayKeys);
+      const emoji = words.emoji;
+      return node.type === "text" && emoji ? sayAs(keys, EMOJI, emoji) : keys;
+    }
     return "value" in node ? located(markdown, node.value, node) : added("");
   };
   const block = (node: Root | RootContent) => {
@@ -172,7 +322,7 @@ export function readAloudSpeech(
         cells.map(({ cell }) => cellMarkdown(markdown, cell)).join(", "),
       );
     } else if (node.type === "math" || (speakMath && node.type === "code" && node.lang === "math"))
-      speak(spread(speakMath?.(node.value) ?? node.value, node), node);
+      speak(spread(formula(node.value, node), node), node);
     else if (node.type === "code") {
       // A diagram's source says nothing a listener can follow.
       if (!skipCodeBlocks && node.lang !== "mermaid")
@@ -185,11 +335,11 @@ export function readAloudSpeech(
       ? parseMarkdownWithMath(markdown)
       : parser.parse(markdown),
   );
-  return { text, sources, blocks };
+  return { text, sources, blocks, formulas };
 }
 
-export function readAloudText(markdown: string, skipCodeBlocks: boolean, speakMath?: SpeakMath) {
-  return readAloudSpeech(markdown, skipCodeBlocks, speakMath).text;
+export function readAloudText(markdown: string, skipCodeBlocks: boolean, words?: ReadAloudWords) {
+  return readAloudSpeech(markdown, skipCodeBlocks, words).text;
 }
 
 /** Splits at sentence ends below `limit`; `start` is each piece's offset in `text`. */
@@ -210,6 +360,20 @@ export function splitReadAloudSpans(text: string, limit = 3500) {
   }
   if (rest) spans.push({ start: offset, text: rest });
   return spans;
+}
+
+// Longer lead-ins delay the word picked by more speech than they are worth.
+const MAX_LEAD_IN = 400;
+
+/**
+ * Where to start speech that should be heard from offset `at`: the start of its sentence, so the
+ * voice reads the word in context, unless that sentence runs too long before it.
+ */
+export function readAloudSentenceStart(text: string, at: number) {
+  const ends = [...text.slice(0, at).matchAll(/[.!?。！？]\s+|\n/gu)];
+  const end = ends.at(-1);
+  const start = end ? end.index + end[0].length : 0;
+  return at - start > MAX_LEAD_IN ? at : start;
 }
 
 export function splitReadAloudText(text: string, limit = 3500) {
@@ -237,13 +401,19 @@ export interface ReadAloudCue {
 
 /** What is being read, as markdown offsets plus cues for renderers that search their text. */
 export interface ReadAloudPosition {
+  /** `first` and `last` are null for a block shown only as math, such as a block formula. */
   readonly block: {
     readonly start: number;
     readonly end: number;
-    readonly first: ReadAloudCue;
-    readonly last: ReadAloudCue;
+    readonly first: ReadAloudCue | null;
+    readonly last: ReadAloudCue | null;
   };
-  readonly word: { readonly start: number; readonly end: number; readonly cue: ReadAloudCue };
+  /** `cue` is null for a word spoken for a formula, which renderers show as math. */
+  readonly word: {
+    readonly start: number;
+    readonly end: number;
+    readonly cue: ReadAloudCue | null;
+  };
 }
 
 const occurrences = (text: string, find: string) => {
@@ -262,10 +432,17 @@ export function readAloudPosition(
     (entry) => spokenStart >= entry.spokenStart && spokenStart < entry.spokenEnd,
   );
   if (!block) return null;
+  // A rendered formula is no text a renderer can search, so cues leave its words out.
+  const shownAt = (index: number) => {
+    const source = speech.sources[index] ?? ADDED;
+    return (
+      source !== ADDED &&
+      !speech.formulas.some((range) => source >= range.start && source < range.end)
+    );
+  };
   const shown = (start: number, end: number) => {
     let result = "";
-    for (let index = start; index < end; index++)
-      if ((speech.sources[index] ?? ADDED) !== ADDED) result += speech.text[index];
+    for (let index = start; index < end; index++) if (shownAt(index)) result += speech.text[index];
     return result;
   };
   const cue = (start: number, end: number) => {
@@ -274,22 +451,28 @@ export function readAloudPosition(
       ? { text, occurrence: occurrences(shown(block.spokenStart, start), text) }
       : undefined;
   };
-  const words = [...speech.text.slice(block.spokenStart, block.spokenEnd).matchAll(/\S+/g)];
-  const first = words[0];
-  const last = words.at(-1);
-  const firstCue =
-    first &&
-    cue(block.spokenStart + first.index, block.spokenStart + first.index + first[0].length);
-  const lastCue =
-    last && cue(block.spokenStart + last.index, block.spokenStart + last.index + last[0].length);
-  const wordCue = cue(spokenStart, spokenEnd);
+  // The block's outermost words with shown text, past any formula at either end.
+  const cues = [...speech.text.slice(block.spokenStart, block.spokenEnd).matchAll(/\S+/g)]
+    .map((word) =>
+      cue(block.spokenStart + word.index, block.spokenStart + word.index + word[0].length),
+    )
+    .filter((entry) => entry !== undefined);
   const wordSources = speech.sources
     .slice(spokenStart, spokenEnd)
     .filter((source) => source !== ADDED);
-  if (!firstCue || !lastCue || !wordCue || wordSources.length === 0) return null;
+  if (wordSources.length === 0) return null;
   return {
-    block: { start: block.sourceStart, end: block.sourceEnd, first: firstCue, last: lastCue },
-    word: { start: Math.min(...wordSources), end: Math.max(...wordSources) + 1, cue: wordCue },
+    block: {
+      start: block.sourceStart,
+      end: block.sourceEnd,
+      first: cues[0] ?? null,
+      last: cues.at(-1) ?? null,
+    },
+    word: {
+      start: Math.min(...wordSources),
+      end: Math.max(...wordSources) + 1,
+      cue: cue(spokenStart, spokenEnd) ?? null,
+    },
   };
 }
 
@@ -410,4 +593,25 @@ export function readAloudSourceAtShown(markdown: string, shown: string, offset: 
 /** The first spoken block that ends after markdown offset `from`: where reading from it starts. */
 export function readAloudBlockFrom(speech: ReadAloudSpeech, from: number) {
   return speech.blocks.find((block) => block.sourceEnd > from);
+}
+
+// As often as dictation's meter and with its smoothing. Speech audio is mastered quieter than a
+// close microphone, so it is scaled up more to fill the same waveform.
+/** How often the read-aloud meter moves, wherever the loudness is measured. */
+export const READ_ALOUD_LEVEL_INTERVAL_MS = 50;
+const READ_ALOUD_LEVEL_GAIN = 8;
+const READ_ALOUD_LEVEL_ATTACK = Math.exp(-READ_ALOUD_LEVEL_INTERVAL_MS / 75);
+const READ_ALOUD_LEVEL_RELEASE = Math.exp(-READ_ALOUD_LEVEL_INTERVAL_MS / 200);
+
+/** The meter's level, from 0 to 1, for audio whose samples (-1 to 1) average `meanSquare`. */
+export function readAloudLevel(meanSquare: number) {
+  return Math.min(1, Math.sqrt(meanSquare) * READ_ALOUD_LEVEL_GAIN) || 0;
+}
+
+/** Eases the meter from `previous` toward `target`: quick to rise, slower to fall. */
+export function smoothReadAloudLevel(previous: number, target: number) {
+  return (
+    target +
+    (previous - target) * (target > previous ? READ_ALOUD_LEVEL_ATTACK : READ_ALOUD_LEVEL_RELEASE)
+  );
 }

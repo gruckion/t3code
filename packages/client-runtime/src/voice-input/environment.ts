@@ -1,8 +1,4 @@
-import type {
-  SpeechSynthesisProvider,
-  SpeechSynthesisRequest,
-  SpeechWordAlignment,
-} from "@t3tools/contracts";
+import type { SpeechSynthesisProvider, SpeechSynthesisRequest } from "@t3tools/contracts";
 import { encodeSpeechPcmRequest } from "@t3tools/shared/speech";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -388,21 +384,17 @@ export const removeEnvironmentSpeechModel = (prepared: PreparedConnection, model
     run: ({ client, headers }) => client.removeModel({ headers, payload: { modelId } }),
   });
 
-/** `alignment` asks the environment to fetch the model that times words this provider lacks. */
 export const getSpeechSynthesisModels = (
   prepared: PreparedConnection,
   provider: SpeechSynthesisProvider,
-  alignment?: SpeechWordAlignment,
-) => {
-  const query = alignment ? { alignment } : {};
-  return request({
+) =>
+  request({
     group: "voice",
     prepared,
     method: "GET",
-    path: (urls) => urls.synthesisModels({ params: { provider }, query }),
-    run: ({ client, headers }) => client.synthesisModels({ headers, params: { provider }, query }),
+    path: (urls) => urls.synthesisModels({ params: { provider } }),
+    run: ({ client, headers }) => client.synthesisModels({ headers, params: { provider } }),
   });
-};
 
 /** Starts synthesis and resolves, once audio exists, with the URL of its live MP3 stream and its token. */
 export const startSpeechSynthesis = (
@@ -436,24 +428,40 @@ export const startSpeechSynthesis = (
 };
 
 /**
- * Word timings of a started synthesis after the first `after`, and its loudness levels after the
- * first `levelsAfter` when set; the environment holds the request until there are some.
+ * Word timings of a started synthesis after the first `after`, and its loudness after the first
+ * `levelsAfter` levels when given; the environment holds the request until there are some.
  */
 export const getSpeechSynthesisTimings = (
   prepared: PreparedConnection,
   token: string,
   after: number,
   levelsAfter?: number,
+) => {
+  const payload = levelsAfter === undefined ? { token, after } : { token, after, levelsAfter };
+  return request({
+    group: "voice",
+    prepared,
+    method: "POST",
+    path: (urls) => urls.synthesisTimings(),
+    run: ({ client, headers }) => client.synthesisTimings({ headers, payload }),
+  });
+};
+
+/** Words for formulas, read by the environment for clients that cannot run Speech Rule Engine. */
+export const speakSpeechMath = (
+  prepared: PreparedConnection,
+  formulas: ReadonlyArray<{ readonly tex: string; readonly display: boolean }>,
+  language: string,
 ) =>
   request({
     group: "voice",
     prepared,
     method: "POST",
-    path: (urls) => urls.synthesisTimings(),
+    path: (urls) => urls.speakMath(),
     run: ({ client, headers }) =>
-      client.synthesisTimings({
+      client.speakMath({
         headers,
-        payload: { token, after, ...(levelsAfter === undefined ? {} : { levelsAfter }) },
+        payload: { formulas: formulas.map(({ tex, display }) => ({ tex, display })), language },
       }),
   });
 

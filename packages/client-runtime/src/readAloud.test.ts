@@ -3,7 +3,6 @@ import { DEFAULT_READ_ALOUD_SETTINGS, EnvironmentId } from "@t3tools/contracts";
 import {
   createReadAloudController,
   createReadAloudWarmup,
-  createSpeechLevels,
   createTimedWords,
   type SpeechPlayback,
   type SpokenWord,
@@ -341,12 +340,14 @@ it("starts at the block a user picks, keeps its markdown offsets, and ignores a 
 it("seeks to a picked word in the audio when its time is known, else reads from that word", async () => {
   const markdown = "First paragraph here.\n\nSecond **bold** one.";
   const texts: string[] = [];
+  const froms: Array<number | undefined> = [];
   const seeks: number[] = [];
   const speeds: number[] = [];
   let seekable = true;
   const prepared: Array<ReturnType<typeof deferred<void>>> = [];
-  const controller = createReadAloudController(async (text) => {
+  const controller = createReadAloudController(async (text, _settings, _signal, _blocks, from) => {
     texts.push(text);
+    froms.push(from);
     const finished = deferred<void>();
     prepared.push(finished);
     return {
@@ -371,10 +372,20 @@ it("seeks to a picked word in the audio when its time is known, else reads from 
   expect(seeks).toEqual(["First paragraph here.\nSecond ".length]);
   expect(texts).toHaveLength(1);
 
-  // A word whose time has not arrived is read from instead, from the word itself, not its block.
+  // A word whose time has not arrived is read again: from its sentence's start for context, with
+  // the audio starting at the word itself.
   seekable = false;
   void controller.seek("1", markdown.indexOf("one"));
-  await vi.waitFor(() => expect(texts).toEqual([texts[0], "one."]));
+  await vi.waitFor(() => expect(texts).toEqual([texts[0], "Second bold one."]));
+  expect(froms).toEqual([undefined, "Second bold ".length]);
+
+  // The lead-in is not in that audio, so a word in it is read again rather than sought.
+  seekable = true;
+  seeks.length = 0;
+  void controller.seek("1", markdown.indexOf("Second"));
+  await vi.waitFor(() => expect(texts).toHaveLength(3));
+  expect(seeks).toEqual([]);
+  expect(froms[2]).toBeUndefined();
 
   // Speed changes go to the player, and later readings keep them.
   await controller.setSpeed(1.25);
@@ -416,6 +427,7 @@ it("follows the environment's word timings on the audio clock and estimates them
     seconds = 0.98;
     provider.refresh();
     expect(heard.at(-1)).toEqual({ start: 4, end: 7 });
+    expect(provider.secondsAt(5)).toBe(1);
     provider.stop();
 
     seconds = 2.5;
@@ -428,6 +440,8 @@ it("follows the environment's word timings on the audio clock and estimates them
     estimated.subscribe((word) => guessed.push(word));
     await vi.advanceTimersByTimeAsync(0);
     expect(guessed).toEqual([{ start: 8, end: 14 }]);
+    // Estimated times only highlight; a seek reads again from the word instead of guessing.
+    expect(estimated.secondsAt(4)).toBeUndefined();
     estimated.stop();
   } finally {
     vi.useRealTimers();
@@ -505,38 +519,56 @@ it("keeps the spoken word highlighted while paused and goes on from it after res
   expect(controller.getHighlight()).toBeNull();
 });
 
-it("looks up the environment's loudness levels by seconds into the audio as batches arrive", () => {
-  const levels = createSpeechLevels();
-  expect(levels.at(0)).toBeUndefined();
-  levels.add({ windowSeconds: 0.05, start: 0, values: [0, 10, 20] });
-  expect([levels.at(0.01), levels.at(0.07), levels.at(0.149), levels.at(-1)]).toEqual([
-    0, 0.5, 1, 0,
-  ]);
-  // Past the levels received, the meter is silent until more arrive.
-  expect(levels.at(0.2)).toBe(0);
-  // A batch that skips levels is dropped; one that overlaps replaces the overlap.
-  levels.add({ windowSeconds: 0.05, start: 5, values: [20] });
-  expect(levels.count).toBe(3);
-  levels.add({ windowSeconds: 0.05, start: 2, values: [4, 8] });
-  expect([levels.count, levels.at(0.1), levels.at(0.15)]).toEqual([4, 0.2, 0.4]);
-});
+it("follows the loudness the environment measured when asked, and only then", async () => {
+  vi.useFakeTimers();
+  try {
+    const requested: Array<number | undefined> = [];
+    const clock = { seconds: 0.6, rate: 1, playing: true };
+    const timed = createTimedWords({
+      text: "one",
+      load: async (_after, levelsAfter) => {
+        requested.push(levelsAfter);
+        return {
+          words: [],
+          levels: [
+            { seconds: 0.5, level: 0.2 },
+            { seconds: 0.6, level: 0.8 },
+          ],
+          done: true,
+        };
+      },
+      clock: () => clock,
+      levels: true,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requested).toEqual([0]);
+    const heard: number[] = [];
+    const stop = timed.followLevels((level) => heard.push(level));
+    // It eases toward the level at the playing position, as a player's own meter does.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(heard[0]).toBeGreaterThan(0);
+    expect(heard[0]).toBeLessThan(0.8);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(heard.at(-1)).toBeCloseTo(0.8, 2);
+    // Past the last level by more than their spacing, the audio is not measured yet.
+    clock.seconds = 0.71;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(heard.at(-1)).toBeLessThan(0.01);
+    stop();
+    expect(heard.at(-1)).toBe(0);
+    timed.stop();
 
-it("asks for levels after those it has and answers them on the audio clock", async () => {
-  const requests: number[] = [];
-  const batches = [
-    { words: [], done: false, levels: { windowSeconds: 0.05, start: 0, values: [10, 10] } },
-    { words: [], done: true, levels: { windowSeconds: 0.05, start: 2, values: [20] } },
-  ];
-  const timed = createTimedWords({
-    text: "one",
-    load: async (_after, _signal, levelsAfter) => {
-      requests.push(levelsAfter);
-      return batches[requests.length - 1]!;
-    },
-    clock: () => ({ seconds: 0, rate: 1, playing: true }),
-  });
-  await vi.waitFor(() => expect(timed.levelAt(0.11)).toBe(1));
-  expect(requests).toEqual([0, 2]);
-  expect(timed.levelAt(0.06)).toBe(0.5);
-  timed.stop();
+    const plain: Array<number | undefined> = [];
+    createTimedWords({
+      text: "one",
+      load: async (_after, levelsAfter) => {
+        plain.push(levelsAfter);
+        return { words: [], done: true };
+      },
+      clock: () => clock,
+    }).stop();
+    expect(plain).toEqual([undefined]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

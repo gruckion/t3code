@@ -17,10 +17,64 @@ import { localSynthesisLanguage, localSynthesisRuntime } from "./LocalSpeechSynt
 import {
   encodeMp3,
   pcm16Mono,
-  speechLines,
+  peakLimiter,
+  speechSentenceSpans,
   splitAtPunctuation,
   supertonicText,
+  wavAudio,
 } from "./synthesisAudio.ts";
+
+it("reads the samples of a 16-bit PCM WAV past any chunk before its data", () => {
+  const samples = Int16Array.of(0, 16384, -32768, 32767);
+  const bytes = new Uint8Array(44 + 10 + samples.byteLength);
+  const view = new DataView(bytes.buffer);
+  const tag = (at: number, id: string) => bytes.set(new TextEncoder().encode(id), at);
+  tag(0, "RIFF");
+  tag(8, "WAVE");
+  tag(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 24_000, true);
+  view.setUint16(34, 16, true);
+  tag(36, "LIST");
+  view.setUint32(40, 2, true);
+  tag(46, "data");
+  view.setUint32(50, samples.byteLength, true);
+  bytes.set(new Uint8Array(samples.buffer), 54);
+  expect(wavAudio(bytes)).toEqual({
+    samples: Float32Array.of(0, 0.5, -1, 32767 / 32768),
+    sampleRate: 24_000,
+    channels: 1,
+  });
+});
+
+it("turns down peaks a model overshoots without touching quieter speech", () => {
+  const rate = 24_000;
+  const tone = (amplitude: number, seconds: number) =>
+    Float32Array.from(
+      { length: rate * seconds },
+      (_, index) => amplitude * Math.sin((2 * Math.PI * 220 * index) / rate),
+    );
+  const { limit, flush } = peakLimiter(rate, 1);
+  // A streaming model's parts can split a word; a peak right after a split is still caught.
+  const loud = tone(1.2, 0.5);
+  const quiet = tone(0.5, 0.1);
+  const out = [
+    ...limit(loud.subarray(0, 4_000)),
+    ...limit(loud.subarray(4_000)),
+    ...limit(new Float32Array(rate)),
+    ...limit(quiet),
+    ...flush(),
+  ];
+  expect(out).toHaveLength(rate / 200 + loud.length + rate + quiet.length);
+  expect(Math.max(...out.slice(0, rate / 200 + loud.length).map(Math.abs))).toBeLessThanOrEqual(
+    0.89,
+  );
+  // Once the release recovers, quiet speech passes through at its own level.
+  const drift = out.slice(-quiet.length).map((sample, index) => Math.abs(sample - quiet[index]!));
+  expect(Math.max(...drift)).toBeLessThan(0.001);
+});
 
 it("encodes model samples as clipped mono 16-bit PCM", () => {
   const pcm = pcm16Mono(Float32Array.of(0, 1, -1, 2, -2, Number.NaN, 0.5), 1);
@@ -28,12 +82,15 @@ it("encodes model samples as clipped mono 16-bit PCM", () => {
   expect([...pcm16Mono(Float32Array.of(1, -1, 0.5, 0.5), 2)]).toEqual([0, 16383]);
 });
 
-it("speaks one line at a time and halves a refused line at its latest break before the middle", () => {
-  expect(speechLines("Fixed it.\n\nThe cause was a race.\nDone.")).toEqual([
-    "Fixed it.",
-    "The cause was a race.",
-    "Done.",
-  ]);
+it("speaks one sentence at a time and halves a refused one at its latest break before the middle", () => {
+  const text = "Fixed it.\n\nIt took 2.06 min. Version v1.2.3 ships.\n设定已确认。好的";
+  expect(
+    speechSentenceSpans(text).map((span) => [span.text, text.slice(span.start, span.end)]),
+  ).toEqual(
+    ["Fixed it.", "It took 2.06 min.", "Version v1.2.3 ships.", "设定已确认。", "好的"].map(
+      (sentence) => [sentence, sentence],
+    ),
+  );
   // Kokoro's reference waterfall: sentence ends, then clauses, then commas, then any space.
   expect(splitAtPunctuation("It took 2 min. Memory fell 66%. Version 1.2.3 ships today.")).toEqual([
     "It took 2 min. ",
@@ -77,6 +134,10 @@ it.each([
   ["xx", undefined],
 ])("maps the %s reading language onto a local model language", (setting, language) => {
   expect(localSynthesisLanguage(setting, ["en", "pt", "ko"])).toBe(language);
+});
+
+it("maps a reading language onto a model language that names its region", () => {
+  expect(localSynthesisLanguage("pt", ["en", "pt-BR"])).toBe("pt-BR");
 });
 
 it.each([
@@ -292,6 +353,11 @@ it.effect.each(["xai", "openrouter"] as const)(
       const openRouterModels = [
         { id: "google/gemini-test-tts", name: "Speech", supported_voices: ["reader"] },
         {
+          id: "qwen/qwen-audio-3.0-tts-flash",
+          name: "Qwen Audio 3.0 TTS Flash",
+          supported_voices: ["Cherry"],
+        },
+        {
           id: "heygen/heygen-voice-1-turbo",
           name: "HeyGen Voice 1 Turbo",
           supported_voices: ["nadine"],
@@ -395,7 +461,7 @@ it.effect.each(["xai", "openrouter"] as const)(
         const catalog = yield* service.synthesisModels(provider);
         expect(catalog).toMatchObject({
           apiKeyProvider: provider,
-          defaultModel: provider === "xai" ? "grok-tts" : "heygen/heygen-voice-1-turbo",
+          defaultModel: provider === "xai" ? "grok-tts" : "qwen/qwen-audio-3.0-tts-flash",
           speedAppliedByProvider: provider !== "openrouter",
           supportsModelSelection: true,
           supportsVoiceSelection: true,
@@ -405,6 +471,11 @@ it.effect.each(["xai", "openrouter"] as const)(
             ? [{ id: "grok-tts", name: "Grok TTS", voices: ["reader"] }]
             : [
                 { id: "google/gemini-test-tts", name: "Speech", voices: ["reader"] },
+                {
+                  id: "qwen/qwen-audio-3.0-tts-flash",
+                  name: "Qwen Audio 3.0 TTS Flash",
+                  voices: ["Cherry"],
+                },
                 {
                   id: "heygen/heygen-voice-1-turbo",
                   name: "HeyGen Voice 1 Turbo",
@@ -423,39 +494,41 @@ it.effect.each(["xai", "openrouter"] as const)(
             new Response(Uint8Array.of(0, 1), { headers: { "content-type": "audio/pcm" } }),
           );
           yield* synthesize(provider, { ...request, model: catalog.defaultModel, voice: "" });
+          // Raw audio, so the environment can time each word for highlighting and seeking.
           expect(JSON.parse(String(upstream.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
-            model: "heygen/heygen-voice-1-turbo",
-            voice: "nadine",
+            model: "qwen/qwen-audio-3.0-tts-flash",
+            voice: "Cherry",
             response_format: "pcm",
           });
           yield* synthesize(provider, { ...request, voice: "" });
           expect(JSON.parse(String(upstream.mock.calls.at(-1)?.[1]?.body)).voice).toBe("reader");
-          for (const [model, expectedRate] of [
-            ["google/gemini-tts", 24000],
-            ["heygen/heygen-voice-1", 44100],
+          // Every model is asked for PCM, and its content type names the rate.
+          for (const [contentType, expectedRate] of [
+            ["audio/pcm", 24000],
+            ["audio/pcm;rate=44100;channels=1", 44100],
           ] as const) {
             upstream.mockResolvedValueOnce(
-              new Response(Uint8Array.of(0, 1), { headers: { "content-type": "audio/pcm" } }),
+              new Response(Uint8Array.of(0, 1), { headers: { "content-type": contentType } }),
             );
             const plainPcm = yield* synthesize(provider, {
               ...request,
-              model,
+              model: "heygen/heygen-voice-1",
               voice: "reader",
             });
             expect(mp3SampleRate(plainPcm)).toBe(expectedRate);
-          }
-          for (const model of ["minimax/speech-test:free", "mistralai/voxtral-mini-tts-2603"]) {
-            upstream.mockResolvedValueOnce(new Response(new Uint8Array([73, 68, 51, 1])));
-            expect([
-              ...(yield* synthesize(provider, {
-                ...request,
-                model,
-              })),
-            ]).toEqual([73, 68, 51, 1]);
             expect(JSON.parse(String(upstream.mock.calls.at(-1)?.[1]?.body)).response_format).toBe(
-              "mp3",
+              "pcm",
             );
           }
+          // A model that sends MP3 anyway plays it unchanged.
+          upstream.mockResolvedValueOnce(
+            new Response(new Uint8Array([73, 68, 51, 1]), {
+              headers: { "content-type": "audio/mpeg" },
+            }),
+          );
+          expect([
+            ...(yield* synthesize(provider, { ...request, model: "minimax/speech-test:free" })),
+          ]).toEqual([73, 68, 51, 1]);
           for (const contentType of [
             "audio/pcm;rate=garbage",
             "audio/pcm;rate=",

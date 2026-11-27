@@ -11,7 +11,6 @@ import {
   removeSpeechSynthesisModel,
 } from "@t3tools/client-runtime/voice-input";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
-import { readAloudWordAlignment } from "@t3tools/client-runtime/read-aloud";
 import {
   CloudSpeechSynthesisProvider,
   AuthFilesystemReadScope,
@@ -22,7 +21,9 @@ import {
   EMPTY_SPEECH_SYNTHESIS_CATALOG,
   type ReadAloudSettings,
   type SpeechSynthesisCatalog,
+  type SpeechSynthesisModelInstall,
   type SpeechSynthesisProvider,
+  WORD_TIMING_MODEL_ID,
 } from "@t3tools/contracts";
 import {
   getClientSettings,
@@ -40,7 +41,7 @@ import {
   MonitorIcon,
   StarIcon,
   Trash2Icon,
-  UnlinkIcon,
+  UnplugIcon,
   XIcon,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -60,8 +61,14 @@ import { SettingsRow, SettingsSearchTarget, SettingsSection } from "./settingsLa
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useCloudRead } from "./CloudVoiceConfiguration";
 import { ReadAloudCleanerSettings } from "./ReadAloudCleanerSettings";
+import { CatalogCombobox } from "./CatalogCombobox";
+import { ModelCatalogToolbar } from "./ModelCatalogToolbar";
+import { orderSpeechLanguages } from "./SpeechModelComparison";
+import { languageLabel } from "./SpeechLanguageSelect";
+import { preferredSpeechLanguages } from "../../speech/preferredSpeechLanguages";
 import { ReadAloudKeyDialog } from "./ReadAloudKeyDialog";
 import { SpeechProviderIcon } from "./SpeechProviderIcon";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 const formatSize = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`;
 
@@ -86,11 +93,16 @@ function LocalSpeechModel({
   onChanged: () => void;
 }) {
   const gt = useGT();
+  const locale = useLocale();
+  const languages = model.languages ?? [];
   const canManage = useEnvironmentScope(prepared.environmentId, AuthSettingsWriteScope);
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState("");
   const install = model.install;
   const downloading = install?.state === "downloading" || install?.state === "verifying";
+  const removeLabel = install?.linkedFrom
+    ? gt("Stop using your {name} file; the file stays on disk", { name: model.name })
+    : gt("Delete {name}", { name: model.name });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Poll the environment's download progress while it runs.
   useEffect(() => {
     if ((!downloading && !requesting) || refreshing) return;
@@ -139,12 +151,23 @@ function LocalSpeechModel({
               </Badge>
             )}
           </div>
-          <p className="mt-0.5 text-xs leading-normal text-muted-foreground">
-            {model.description}{" "}
-            {install.state === "installed"
-              ? gt("{size}.", { size: formatSize(install.size) })
-              : gt("{size} download.", { size: formatSize(install.size) })}
-          </p>
+          {model.description ? (
+            <p className="mt-0.5 text-xs leading-normal text-muted-foreground">
+              {model.description}
+            </p>
+          ) : null}
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground tabular-nums">
+            {languages.length > 1 ? (
+              <span>
+                {gt("{count, plural, one {{count} language} other {{count} languages}}", {
+                  count: languages.length,
+                })}
+              </span>
+            ) : languages[0] ? (
+              <span>{languageLabel(languages[0], locale)}</span>
+            ) : null}
+            <span>{formatSize(install.size)}</span>
+          </div>
           {install.linkedFrom && (
             <p className="mt-0.5 break-all text-2xs text-muted-foreground">
               <T>
@@ -212,23 +235,135 @@ function LocalSpeechModel({
             </Button>
           )}
           {install.state === "installed" && (
-            <Button
-              size="icon-sm"
-              variant="outline"
-              disabled={!canManage || requesting}
-              aria-label={
-                install.linkedFrom
-                  ? gt("Stop using your {name} file; the file stays on disk", { name: model.name })
-                  : gt("Delete {name}", { name: model.name })
+            <SharedTooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  disabled={!canManage || requesting}
+                  aria-label={removeLabel}
+                  onClick={() => void run("remove")}
+                />
               }
-              onClick={() => void run("remove")}
+              label={removeLabel}
             >
-              {install.linkedFrom ? <UnlinkIcon /> : <Trash2Icon />}
-            </Button>
+              {install.linkedFrom ? <UnplugIcon /> : <Trash2Icon />}
+            </SharedTooltipTrigger>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** The environment's model that times spoken words for providers that report none. */
+function WordTimingRow({
+  prepared,
+  install,
+  refreshing,
+  onChanged,
+}: {
+  prepared: PreparedConnection;
+  install: SpeechSynthesisModelInstall;
+  /** A catalog request is in flight; polling waits for it rather than aborting it. */
+  refreshing: boolean;
+  onChanged: () => void;
+}) {
+  const gt = useGT();
+  const canManage = useEnvironmentScope(prepared.environmentId, AuthSettingsWriteScope);
+  const [requesting, setRequesting] = useState(false);
+  const [error, setError] = useState("");
+  const downloading = install.state === "downloading" || install.state === "verifying";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Poll the environment's download progress while it runs.
+  useEffect(() => {
+    if ((!downloading && !requesting) || refreshing) return;
+    const timer = window.setTimeout(onChanged, 1_000);
+    return () => window.clearTimeout(timer);
+  }, [downloading, requesting, refreshing, onChanged]);
+  const run = async (action: "download" | "cancel" | "remove") => {
+    setRequesting(true);
+    setError("");
+    try {
+      await runEnvironmentSpeech(
+        action === "download"
+          ? downloadSpeechSynthesisModel(prepared, WORD_TIMING_MODEL_ID)
+          : action === "cancel"
+            ? cancelSpeechSynthesisModelDownload(prepared, WORD_TIMING_MODEL_ID)
+            : removeSpeechSynthesisModel(prepared, WORD_TIMING_MODEL_ID),
+      );
+    } catch {
+      setError(
+        action === "download"
+          ? gt("Could not download the model. Check the environment’s connection and disk space.")
+          : gt("Could not change the model. Try again."),
+      );
+    }
+    setRequesting(false);
+    onChanged();
+  };
+  const progress =
+    install.downloaded === undefined || install.size === 0
+      ? 0
+      : Math.min(100, (install.downloaded / install.size) * 100);
+  return (
+    <SettingsRow
+      title={gt("Word timing")}
+      description={
+        error ? (
+          <span role="alert" className="text-destructive">
+            {error}
+          </span>
+        ) : downloading ? (
+          install.state === "verifying" ? (
+            gt("Verifying download…")
+          ) : (
+            gt("{percent}% downloaded", { percent: Math.round(progress) })
+          )
+        ) : (
+          gt(
+            "Follows each spoken word exactly and starts reading right at the word you pick. Without it, the highlight is estimated. The model is for non-commercial use only.",
+          )
+        )
+      }
+      control={
+        downloading ? (
+          <Button
+            size="icon-sm"
+            variant="outline"
+            aria-label={gt("Cancel word timing download")}
+            disabled={!canManage}
+            onClick={() => void run("cancel")}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        ) : install.state === "installed" ? (
+          <SharedTooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="outline"
+                disabled={!canManage || requesting}
+                aria-label={gt("Delete the word timing model")}
+                onClick={() => void run("remove")}
+              />
+            }
+            label={gt("Delete the word timing model")}
+          >
+            <Trash2Icon />
+          </SharedTooltipTrigger>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!canManage || requesting}
+            onClick={() => void run("download")}
+          >
+            <DownloadIcon />
+            {gt("Download {size}", { size: formatSize(install.size) })}
+          </Button>
+        )
+      }
+    />
   );
 }
 
@@ -286,6 +421,121 @@ function LocalSpeechModelLink({
   );
 }
 
+type LocalModelSort = "recommended" | "size";
+type LocalModelEntry = SpeechSynthesisCatalog["models"][number];
+
+/** Read aloud's local models, browsed like transcription models: by name, language, and size. */
+function LocalSpeechModelBrowser({
+  prepared,
+  models,
+  selectedModel,
+  refreshing,
+  onSelect,
+  onChanged,
+}: {
+  prepared: PreparedConnection;
+  models: ReadonlyArray<LocalModelEntry>;
+  selectedModel: string;
+  refreshing: boolean;
+  onSelect: (id: string) => void;
+  onChanged: () => void;
+}) {
+  const gt = useGT();
+  const locale = useLocale();
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<LocalModelSort>("recommended");
+  const [downloadedOnly, setDownloadedOnly] = useState(false);
+  const [selection, setSelection] = useState<string[] | null>(null);
+  const [preferred] = useState(preferredSpeechLanguages);
+  const spoken = [...new Set(models.flatMap((entry) => entry.languages ?? []))];
+  const defaultLanguage = preferred.find((code) => spoken.includes(code));
+  const selectedLanguages = selection ?? (defaultLanguage ? [defaultLanguage] : []);
+  const query = search.trim().toLocaleLowerCase();
+  const order = (entry: LocalModelEntry) =>
+    entry.id === selectedModel
+      ? 0
+      : entry.install?.state === "installed"
+        ? 1
+        : entry.install?.state === "downloading" || entry.install?.state === "verifying"
+          ? 2
+          : 3;
+  const shown = models
+    .filter(
+      (entry) =>
+        selectedLanguages.every((code) => entry.languages?.includes(code) ?? true) &&
+        (!downloadedOnly || entry.install?.state === "installed") &&
+        (!query || `${entry.name} ${entry.description ?? ""}`.toLocaleLowerCase().includes(query)),
+    )
+    .toSorted((left, right) =>
+      sort === "size"
+        ? (left.install?.size ?? 0) - (right.install?.size ?? 0)
+        : order(left) - order(right) ||
+          Number(right.recommended === true) - Number(left.recommended === true),
+    );
+  const selected = models.find((entry) => entry.id === selectedModel);
+  const rendered = selected && !shown.includes(selected) ? [selected, ...shown] : shown;
+  const sortLabels: Record<LocalModelSort, string> = {
+    recommended: gt("Recommended"),
+    size: gt("Smallest"),
+  };
+  return (
+    <SettingsRow
+      title={gt("Models")}
+      description={gt(
+        "Downloaded once to the selected environment, which reads replies without the text leaving it.",
+      )}
+      className="@container/voice-models"
+    >
+      <ModelCatalogToolbar
+        searchLabel={gt("Search speech models")}
+        search={search}
+        onSearch={setSearch}
+        languages={orderSpeechLanguages(spoken, preferred, locale)}
+        selectedLanguages={selectedLanguages}
+        onSelectLanguages={setSelection}
+        sort={sort}
+        sortLabels={sortLabels}
+        onSort={setSort}
+        downloadedOnly={downloadedOnly}
+        onDownloadedOnly={setDownloadedOnly}
+      />
+      <div
+        className="mt-2 mb-2 max-h-96 divide-y divide-border/60 overflow-y-auto rounded-lg border border-border/60"
+        role="region"
+        aria-label={gt("Read-aloud models")}
+        tabIndex={0}
+      >
+        {shown.length === 0 && (
+          <p className="px-3 py-3 text-sm text-muted-foreground">
+            <T>No models match.</T>
+          </p>
+        )}
+        {rendered.map((entry) => (
+          <LocalSpeechModel
+            key={`${prepared.environmentId}:${entry.id}`}
+            prepared={prepared}
+            model={entry}
+            selected={entry.id === selectedModel}
+            recommended={entry.recommended === true}
+            refreshing={refreshing}
+            onSelect={() => onSelect(entry.id)}
+            onDownloaded={() => {
+              // Settings may have moved on while the model downloaded.
+              const current = getClientSettings().readAloud;
+              if (current.provider === "local" && current.environmentId === prepared.environmentId)
+                void updateClientSettings({
+                  readAloud: { ...current, model: entry.id, voice: "" },
+                });
+            }}
+            onChanged={onChanged}
+          />
+        ))}
+      </div>
+      <LocalSpeechModelLink prepared={prepared} onChanged={onChanged} />
+    </SettingsRow>
+  );
+}
+
 export function ReadAloudSettingsSection() {
   const gt = useGT();
   const settings = useClientSettings((value) => value.readAloud);
@@ -332,9 +582,6 @@ export function ReadAloudSettingsSection() {
     readAloudController.getSnapshot,
   );
   const remote = settings.provider !== "off" && settings.provider !== "system";
-  const locale = useLocale();
-  const alignment = readAloudWordAlignment(settings, locale);
-  const englishLocale = /^en(?:-|$)/i.test(locale);
   const change = (patch: Partial<ReadAloudSettings>) => {
     readAloudController.stop();
     void updateClientSettings({ readAloud: { ...settings, ...patch } });
@@ -352,7 +599,7 @@ export function ReadAloudSettingsSection() {
     if (!remote || !prepared) return;
     const abort = new AbortController();
     void runEnvironmentSpeech(
-      getSpeechSynthesisModels(prepared, settings.provider as SpeechSynthesisProvider, alignment),
+      getSpeechSynthesisModels(prepared, settings.provider as SpeechSynthesisProvider),
       { signal: abort.signal },
     ).then(
       (result) => {
@@ -375,7 +622,7 @@ export function ReadAloudSettingsSection() {
       },
     );
     return () => abort.abort();
-  }, [prepared, remote, settings.provider, catalogKey, catalogVersion, alignment]);
+  }, [prepared, remote, settings.provider, catalogKey, catalogVersion]);
   const modelEntry = catalog.models.find((entry) => entry.id === model);
   const voices =
     settings.provider === "system"
@@ -607,71 +854,34 @@ export function ReadAloudSettingsSection() {
       {settings.provider === "off" ? null : (
         <>
           {prepared && localModels.length > 0 && (
-            <SettingsRow
-              title={gt("Models")}
-              description={gt(
-                "Downloaded once to the selected environment, which reads replies without the text leaving it.",
-              )}
-              className="@container/voice-models"
-            >
-              <div
-                className="mt-3 mb-2 divide-y divide-border/60 rounded-lg border border-border/60"
-                role="region"
-                aria-label={gt("Read-aloud models")}
-              >
-                {localModels.map((entry) => (
-                  <LocalSpeechModel
-                    key={`${prepared.environmentId}:${entry.id}`}
-                    prepared={prepared}
-                    model={entry}
-                    selected={entry.id === model}
-                    recommended={entry.id === catalog.defaultModel}
-                    refreshing={catalogState.version !== catalogVersion}
-                    onSelect={() => change({ model: entry.id, voice: "" })}
-                    onDownloaded={() => {
-                      // Settings may have moved on while the model downloaded.
-                      const current = getClientSettings().readAloud;
-                      if (
-                        current.provider === "local" &&
-                        current.environmentId === prepared.environmentId
-                      )
-                        void updateClientSettings({
-                          readAloud: { ...current, model: entry.id, voice: "" },
-                        });
-                    }}
-                    onChanged={refreshCatalog}
-                  />
-                ))}
-              </div>
-              <LocalSpeechModelLink prepared={prepared} onChanged={refreshCatalog} />
-            </SettingsRow>
+            <LocalSpeechModelBrowser
+              prepared={prepared}
+              models={localModels}
+              selectedModel={model}
+              refreshing={catalogState.version !== catalogVersion}
+              onSelect={(id) => change({ model: id, voice: "" })}
+              onChanged={refreshCatalog}
+            />
           )}
           {cloudProvider && catalog.supportsModelSelection && catalog.models.length > 0 && (
             <SettingsRow
-              title={gt("Speech model")}
-              description={gt("Choose a speech model from the provider catalog.")}
+              title={gt("Model", { $context: "text-to-speech model setting" })}
+              description={gt("The {company} model that reads replies aloud.", {
+                company: CLOUD_SPEECH_PROVIDER_NAMES[cloudProvider],
+              })}
               control={
-                <Select
-                  value={model}
-                  onValueChange={(value) => {
-                    if (value) change({ model: value, voice: "" });
-                  }}
-                >
-                  <SelectTrigger size="sm" aria-label={gt("Read-aloud model")}>
-                    <SelectValue>
-                      {catalog.models.find((entry) => entry.id === model)?.name ||
-                        model ||
-                        gt("Choose a model")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup align="end" alignItemWithTrigger={false}>
-                    {catalog.models.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                <div className="w-64 max-w-full">
+                  <CatalogCombobox
+                    items={catalog.models}
+                    value={model}
+                    onChange={(next) => {
+                      if (next && next !== model) change({ model: next, voice: "" });
+                    }}
+                    label={gt("Read-aloud model")}
+                    placeholder={gt("Search speech models")}
+                    empty={<T>No speech model matches.</T>}
+                  />
+                </div>
               }
             />
           )}
@@ -681,38 +891,31 @@ export function ReadAloudSettingsSection() {
               title={gt("Voice", { $context: "the speaker voice used to read text aloud" })}
               description={gt("An empty value uses the provider’s default voice.")}
               control={
-                voices.length ? (
-                  <Select
-                    value={settings.voice || "default"}
-                    onValueChange={(value) => {
-                      if (value) change({ voice: value === "default" ? "" : value });
-                    }}
-                  >
-                    <SelectTrigger size="sm" aria-label={gt("Read-aloud voice")}>
-                      <SelectValue>
-                        {voices.find((entry) => entry.id === settings.voice)?.name ||
-                          gt("Default", { $context: "default voice" })}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup align="end" alignItemWithTrigger={false}>
-                      <SelectItem value="default">
-                        {gt("Default", { $context: "default voice" })}
-                      </SelectItem>
-                      {voices.map((voice) => (
-                        <SelectItem key={voice.id} value={voice.id}>
-                          {voice.name}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
-                ) : (
-                  <Input
-                    aria-label={gt("Read-aloud voice")}
-                    placeholder={gt("Default voice")}
-                    value={settings.voice}
-                    onChange={(event) => change({ voice: event.target.value })}
-                  />
-                )
+                <div className="w-64 max-w-full">
+                  {voices.length ? (
+                    <CatalogCombobox
+                      items={[
+                        { id: "", name: gt("Default", { $context: "default voice" }) },
+                        ...voices,
+                      ]}
+                      value={settings.voice}
+                      onChange={(voice) => {
+                        if (voice !== settings.voice) change({ voice });
+                      }}
+                      label={gt("Read-aloud voice")}
+                      placeholder={gt("Search voices")}
+                      empty={<T>No voice matches.</T>}
+                      showIds={false}
+                    />
+                  ) : (
+                    <Input
+                      aria-label={gt("Read-aloud voice")}
+                      placeholder={gt("Default voice")}
+                      value={settings.voice}
+                      onChange={(event) => change({ voice: event.target.value })}
+                    />
+                  )}
+                </div>
               }
             />
           )}
@@ -739,6 +942,14 @@ export function ReadAloudSettingsSection() {
               </Select>
             }
           />
+          {prepared && catalog.wordTimingModel && (
+            <WordTimingRow
+              prepared={prepared}
+              install={catalog.wordTimingModel}
+              refreshing={catalogState.version !== catalogVersion}
+              onChanged={refreshCatalog}
+            />
+          )}
           <SettingsRow
             title={gt("Skip code blocks")}
             description={gt(
@@ -755,21 +966,6 @@ export function ReadAloudSettingsSection() {
           {cloudProvider && selectedEnvironment && (
             <ReadAloudCleanerSettings environmentId={selectedEnvironment.environmentId} />
           )}
-          {remote && englishLocale && catalog.wordTimings !== "provider" ? (
-            <SettingsRow
-              title={gt("Multilingual word timing")}
-              description={gt(
-                "Highlight the spoken word in 25 languages, not just English. Downloads a 740 MB model to the selected environment instead of a 135 MB one.",
-              )}
-              control={
-                <Switch
-                  aria-label={gt("Time words in 25 languages")}
-                  checked={settings.multilingualWordTiming}
-                  onCheckedChange={(multilingualWordTiming) => change({ multilingualWordTiming })}
-                />
-              }
-            />
-          ) : null}
           <SettingsRow
             title={gt("Preview", { $context: "noun, a sample of the voice" })}
             description={

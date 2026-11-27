@@ -157,11 +157,7 @@ const OpenRouterCatalog = Schema.Struct({
   data: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.optionalKey(Schema.String) })),
 });
 
-const OPENROUTER_DEFAULT_SYNTHESIS_MODEL = "heygen/heygen-voice-1-turbo";
-
-function openRouterSpeechFormat(model: string) {
-  return model.startsWith("google/gemini-") || model.startsWith("heygen/") ? "pcm" : "mp3";
-}
+const OPENROUTER_DEFAULT_SYNTHESIS_MODEL = "qwen/qwen-audio-3.0-tts-flash";
 
 function synthesisErrorReason(status: number): SpeechSynthesisError["reason"] {
   return status === 401 || status === 403
@@ -205,7 +201,13 @@ type SynthesisBackend = {
 export type SpeechSynthesisPart =
   | Uint8Array
   | { readonly words: ReadonlyArray<SpeechSynthesisWord> }
-  | { readonly pcm: Int16Array; readonly rate: number; readonly startSeconds: number };
+  | {
+      readonly pcm: Int16Array;
+      readonly rate: number;
+      readonly startSeconds: number;
+      /** The request text this audio speaks, which word timing aligns it to. */
+      readonly span: { readonly start: number; readonly end: number };
+    };
 
 // gpt-4o-mini-tts accepts 2,000 tokens, which Chinese or Japanese reaches near 2,000 characters,
 // and OpenRouter's Seed Audio accepts 3,000 characters. Pieces stream back to back, so small is cheap.
@@ -574,15 +576,17 @@ export const layer = Layer.effect(
               input: input.text,
               model: input.model,
               ...(voice ? { voice } : {}),
-              response_format: openRouterSpeechFormat(input.model),
+              // Raw audio for every model, so the environment can time each word; the
+              // response's content type names its rate.
+              response_format: "pcm",
             }),
           );
         }),
-        pcmFormat: (response, input) => {
-          if (openRouterSpeechFormat(input.model) !== "pcm") return undefined;
+        pcmFormat: (response) => {
           const contentType = response.headers["content-type"] ?? "";
-          const defaultRate = input.model.startsWith("heygen/") ? 44100 : 24000;
-          const rate = Number(/(?:^|;)\s*rate\s*=([^;]*)/i.exec(contentType)?.[1] ?? defaultRate);
+          // A model that answers with encoded audio anyway plays as it is, without word timings.
+          if (!/^audio\/(?:pcm|l16)\b/i.test(contentType)) return undefined;
+          const rate = Number(/(?:^|;)\s*rate\s*=([^;]*)/i.exec(contentType)?.[1] ?? "24000");
           const channels = Number(/(?:^|;)\s*channels\s*=([^;]*)/i.exec(contentType)?.[1] ?? "1");
           return { rate, channels };
         },
@@ -670,7 +674,8 @@ export const layer = Layer.effect(
               ])
             : null;
         const cached = cacheKey === null ? Option.none() : yield* cache.readAudio(cacheKey);
-        if (Option.isSome(cached)) return ReadAloudCache.replayAudio(cached.value);
+        if (Option.isSome(cached))
+          return ReadAloudCache.replayAudio(cached.value, { start: 0, end: input.text.length });
         const record = <E>(parts: Stream.Stream<SpeechSynthesisPart, E>) =>
           cacheKey === null ? parts : ReadAloudCache.recordAudio(cache, cacheKey, parts);
         // Resolved per piece and after building, which may fetch a catalog, so the key sent is
@@ -719,7 +724,12 @@ export const layer = Layer.effect(
                 const { pcm, mp3 } = encoder.push(chunk);
                 const parts: SpeechSynthesisPart[] = [];
                 if (pcm.length) {
-                  parts.push({ pcm, rate: format.rate, startSeconds: seconds });
+                  parts.push({
+                    pcm,
+                    rate: format.rate,
+                    startSeconds: seconds,
+                    span: { start: 0, end: input.text.length },
+                  });
                   seconds += pcm.length / format.rate;
                 }
                 if (mp3.length) parts.push(mp3);
@@ -795,13 +805,13 @@ export const layer = Layer.effect(
                   request.text.slice(segment.start, segment.end),
                 );
                 return Stream.fromIterable(
-                  splitReadAloudSpans(spoken.text, CLOUD_SYNTHESIS_TEXT_LIMIT).map((span) => ({
-                    text: span.text,
-                    place: (start: number, end: number) => {
+                  splitReadAloudSpans(spoken.text, CLOUD_SYNTHESIS_TEXT_LIMIT).map((span) => {
+                    const place = (start: number, end: number) => {
                       const at = spoken.place(span.start + start, span.start + end);
                       return at && { start: segment.start + at.start, end: segment.start + at.end };
-                    },
-                  })),
+                    };
+                    return { text: span.text, place, whole: segment };
+                  }),
                 );
               }),
             ),
@@ -811,11 +821,11 @@ export const layer = Layer.effect(
           Stream.mapEffect(
             (piece) =>
               synthesizePiece(provider, { ...request, text: piece.text }).pipe(
-                Effect.map((parts) => ({ place: piece.place, parts })),
+                Effect.map((parts) => ({ place: piece.place, whole: piece.whole, parts })),
               ),
             { concurrency: 2 },
           ),
-          Stream.flatMap(({ place, parts }) =>
+          Stream.flatMap(({ place, whole, parts }) =>
             Stream.suspend(() => {
               const offset = elapsed;
               const duration = mp3Duration();
@@ -825,7 +835,17 @@ export const layer = Layer.effect(
                     duration.push(part);
                     return part;
                   }
-                  if ("pcm" in part) return { ...part, startSeconds: part.startSeconds + offset };
+                  if ("pcm" in part)
+                    return {
+                      ...part,
+                      startSeconds: part.startSeconds + offset,
+                      // The text the audio speaks, in the request; a whole segment when its
+                      // spoken rewrite has no word placed there.
+                      span: place(part.span.start, part.span.end) ?? {
+                        start: whole.start,
+                        end: whole.end,
+                      },
+                    };
                   return {
                     words: part.words.flatMap((word) => {
                       const at = place(word.start, word.end);

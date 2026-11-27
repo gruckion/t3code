@@ -1,5 +1,4 @@
 import {
-  SpeechSynthesisCatalogQuery,
   SpeechSynthesisProvider,
   SpeechSynthesisRequest,
   SpeechSynthesisCatalog,
@@ -7,6 +6,8 @@ import {
   SpeechSynthesisModelRequest,
   SpeechSynthesisPrepareRequest,
   SpeechSynthesisStream,
+  SpeechMath,
+  SpeechMathRequest,
   SpeechSynthesisTimings,
   SpeechSynthesisTimingsRequest,
 } from "./readAloud.ts";
@@ -874,7 +875,6 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
     HttpApiEndpoint.get("synthesisModels", "/api/voice/synthesis/:provider/models", {
       headers: OptionalBearerHeaders,
       params: Schema.Struct({ provider: SpeechSynthesisProvider }),
-      query: SpeechSynthesisCatalogQuery,
       success: SpeechSynthesisCatalog,
       error: [...EnvironmentScopedOperationErrors, SpeechSynthesisError],
     }).middleware(EnvironmentAuthenticatedAuth),
@@ -898,6 +898,15 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
       headers: OptionalBearerHeaders,
       payload: SpeechSynthesisTimingsRequest,
       success: SpeechSynthesisTimings,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    // For clients that cannot run Speech Rule Engine, such as React Native.
+    HttpApiEndpoint.post("speakMath", "/api/voice/synthesis/math", {
+      headers: OptionalBearerHeaders,
+      payload: SpeechMathRequest,
+      success: SpeechMath,
       error: EnvironmentScopedOperationErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )

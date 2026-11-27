@@ -24,6 +24,11 @@ const SPEECH_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, tr, pre";
 const INTERACTIVE_SELECTOR =
   "a, button, input, textarea, select, summary, label, pre, [role=button], [role=link], [contenteditable=true], .katex";
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+/**
+ * Rendered formulas, tinted whole through their element's background: a text highlight through
+ * their SVG paints over the glyphs it crosses.
+ */
+const MATH_SELECTOR = "[data-markdown-math]";
 
 const roots = new Map<string, HTMLElement>();
 let highlights: {
@@ -39,6 +44,7 @@ let readingId: string | null = null;
 let readingRange: Range | null = null;
 // Where the word being read is, relative to the view, while it is out of view.
 let away: "above" | "below" | null = null;
+let tinted: HTMLElement[] = [];
 const awayListeners = new Set<() => void>();
 let reveal: ((id: string) => boolean) | null = null;
 
@@ -111,11 +117,43 @@ export function readAloudHighlightRoot(id: string) {
   };
 }
 
+function tint(element: HTMLElement, level: "block" | "word") {
+  element.dataset.readAloud = level;
+  tinted.push(element);
+}
+
+/** Adds `range` to `highlight` around the formulas in it, which get the block tint instead. */
+function addAroundMath(highlight: Highlight, range: Range) {
+  const ancestor = range.commonAncestorContainer;
+  const container = ancestor instanceof Element ? ancestor : ancestor.parentElement;
+  let rest = range.cloneRange();
+  for (const formula of container?.querySelectorAll<HTMLElement>(MATH_SELECTOR) ?? []) {
+    if (!range.intersectsNode(formula)) continue;
+    rest.setEndBefore(formula);
+    if (!rest.collapsed) highlight.add(rest);
+    tint(formula, "block");
+    rest = range.cloneRange();
+    rest.setStartAfter(formula);
+  }
+  if (!rest.collapsed) highlight.add(rest);
+}
+
+/** The rendered formula whose words are spoken at markdown range `start`..`end`. */
+function formulaAt(root: HTMLElement, start: number, end: number) {
+  for (const formula of root.querySelectorAll<HTMLElement>(MATH_SELECTOR)) {
+    if (Number(formula.dataset.mathStart) < end && Number(formula.dataset.mathEnd) > start)
+      return formula;
+  }
+  return null;
+}
+
 function paint() {
   if (!highlights) return;
   const highlight = readAloudController.getHighlight();
   highlights.block.clear();
   highlights.word.clear();
+  for (const element of tinted) delete element.dataset.readAloud;
+  tinted = [];
   if (!highlight) {
     readingId = null;
     readingRange = null;
@@ -130,26 +168,43 @@ function paint() {
   }
   const root = roots.get(highlight.id);
   const block = root?.isConnected ? blockElement(root, highlight.block) : null;
+  // A word spoken for a formula has no cue: the formula is tinted as one word.
+  const formula =
+    root?.isConnected && !highlight.word.cue
+      ? formulaAt(root, highlight.word.start, highlight.word.end)
+      : null;
   if (!block) {
     readingRange = null;
+    if (formula) {
+      tint(formula, "word");
+      readingRange = document.createRange();
+      readingRange.selectNode(formula);
+      watchScroller(formula.closest<HTMLElement>(".messages-timeline-scroll"));
+      follow(readingRange);
+    }
     return measureAway();
   }
   const text = spokenText(block);
   const first = locate(text, highlight.block.first);
   const last = locate(text, highlight.block.last);
-  const word = locate(text, highlight.word.cue);
+  const word = highlight.word.cue && locate(text, highlight.word.cue);
   const blockRange =
     first && last && first.start < last.end ? range(text, first.start, last.end) : null;
-  if (blockRange) highlights.block.add(blockRange);
+  if (blockRange) addAroundMath(highlights.block, blockRange);
   else {
     const whole = document.createRange();
     whole.selectNodeContents(block);
-    highlights.block.add(whole);
+    addAroundMath(highlights.block, whole);
   }
   const wordRange = word ? range(text, word.start, word.end) : null;
   if (wordRange) highlights.word.add(wordRange);
+  const formulaRange = formula && document.createRange();
+  if (formula && formulaRange) {
+    tint(formula, "word");
+    formulaRange.selectNode(formula);
+  }
   watchScroller(block.closest<HTMLElement>(".messages-timeline-scroll"));
-  readingRange = wordRange ?? blockRange;
+  readingRange = wordRange ?? formulaRange ?? blockRange;
   follow(readingRange);
   measureAway();
 }
@@ -172,20 +227,23 @@ function blockElement(root: HTMLElement, block: ReadAloudHighlight["block"]) {
  * carry no range. Take the first innermost block whose text holds the block's first and last words.
  */
 function blockElementByText(root: HTMLElement, block: ReadAloudHighlight["block"]) {
+  // A block shown only as math has no text to match; its formula is tinted instead.
+  const { first: firstCue, last: lastCue } = block;
+  if (!firstCue || !lastCue) return null;
   const candidates = [...root.querySelectorAll<HTMLElement>(SPEECH_BLOCK_SELECTOR)]
     .filter((element) => !element.querySelector(SPEECH_BLOCK_SELECTOR))
     .map((element) => ({ element, text: spokenText(element) }));
   for (const { element, text } of candidates) {
-    const first = locate(text, block.first);
-    const last = locate(text, block.last);
+    const first = locate(text, firstCue);
+    const last = locate(text, lastCue);
     if (first && last && first.start <= last.start) return element;
   }
   // A chip, footnote mark, or rendered formula can show an end word differently from how it is
   // spoken; the block still starts or ends with the other one.
   const edge = (text: string) => text.trim().replace(/[^\p{L}\p{N}]+$/u, "");
   return (
-    candidates.find(({ text }) => text.value.trimStart().startsWith(block.first.text))?.element ??
-    candidates.find(({ text }) => edge(text.value).endsWith(edge(block.last.text)))?.element ??
+    candidates.find(({ text }) => text.value.trimStart().startsWith(firstCue.text))?.element ??
+    candidates.find(({ text }) => edge(text.value).endsWith(edge(lastCue.text)))?.element ??
     null
   );
 }
@@ -331,7 +389,8 @@ function textOffset(text: SpokenText, node: Node, offset: number) {
 }
 
 /** The cue's place in the rendered text: its `occurrence`-th appearance, counted as the cue was. */
-function locate(text: SpokenText, cue: ReadAloudCue) {
+function locate(text: SpokenText, cue: ReadAloudCue | null) {
+  if (!cue) return null;
   let at = text.value.indexOf(cue.text);
   for (let seen = 0; at !== -1 && seen < cue.occurrence; seen++)
     at = text.value.indexOf(cue.text, at + cue.text.length);

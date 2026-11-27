@@ -55,6 +55,7 @@ import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
 import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
 import * as LocalSpeechSynthesis from "./speech/LocalSpeechSynthesis.ts";
+import * as MathSpeech from "./speech/MathSpeech.ts";
 import * as SpeechAligner from "./speech/SpeechAligner.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
@@ -815,7 +816,10 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
   Layer.provideMerge(ProviderRegistry.layer),
   Layer.provideMerge(
-    ProviderInstanceRegistryHydration.layer.pipe(Layer.provide(SqlitePersistence.layerConfig)),
+    ProviderInstanceRegistryHydration.layer.pipe(
+      Layer.provide(SqlitePersistence.layerConfig),
+      Layer.provide(layerNativeTelemetry),
+    ),
   ),
   // One gate for the server, below hydration so the Claude adapter sees it: layers memoize by
   // reference, so the runtime layer shares it.
@@ -976,8 +980,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     Layer.mergeAll(
       SpeechService.layer.pipe(Layer.provide(layerServerSettings)),
-      LocalSpeechSynthesis.layer,
-      SpeechAligner.layer,
+      SpeechAligner.layer.pipe(Layer.provideMerge(LocalSpeechSynthesis.layer)),
+      MathSpeech.layer,
     ).pipe(Layer.provide(SpeechModelStore.layer), Layer.provide(layerReadAloudSpeechText)),
   ),
   Layer.provide(OpenRouterSignIn.layer),

@@ -1,24 +1,27 @@
 import {
-  SPEECH_SYNTHESIS_LEVEL_STEPS,
   SPEECH_SYNTHESIS_MAX_TEXT,
   type EnvironmentId,
   type ReadAloudSettings,
   type SpeechSynthesisBlock,
-  type SpeechSynthesisLevels,
+  type SpeechSynthesisLevel,
   type SpeechSynthesisTimings,
   type SpeechSynthesisWord,
-  type SpeechWordAlignment,
 } from "@t3tools/contracts";
 import {
+  READ_ALOUD_LEVEL_INTERVAL_MS,
   readAloudBlockFrom,
   readAloudPosition,
+  readAloudSentenceStart,
   readAloudSpeech,
+  smoothReadAloudLevel,
   splitReadAloudSpans,
   spokenWordAt,
   type ReadAloudSpeech,
   type ReadAloudPosition,
+  type ReadAloudWords,
   type SpeakMath,
 } from "@t3tools/shared/read-aloud";
+import { prepareReadAloudEmoji } from "./readAloudEmoji.ts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -109,67 +112,45 @@ export type PlaybackClock = {
   readonly playing: boolean;
 };
 
-/**
- * The model that times words for providers that report none: English for English UI locales
- * unless the user asked for the multilingual one, which every other locale uses.
- */
-export function readAloudWordAlignment(
-  settings: Pick<ReadAloudSettings, "multilingualWordTiming">,
-  locale: string,
-): SpeechWordAlignment {
-  return /^en(?:-|$)/i.test(locale) && !settings.multilingualWordTiming
-    ? "english"
-    : "multilingual";
+/** The loudness at `seconds`: the nearest level, or 0 past the levels that have arrived. */
+function levelAt(levels: ReadonlyArray<SpeechSynthesisLevel>, seconds: number) {
+  let low = 0;
+  let high = levels.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (levels[middle]!.seconds <= seconds) low = middle + 1;
+    else high = middle - 1;
+  }
+  const before = levels[high];
+  const after = levels[low];
+  if (!after) {
+    // Past the last level by more than the spacing between levels, the audio is not measured yet.
+    const spacing = before && levels[high - 1] ? before.seconds - levels[high - 1]!.seconds : 0;
+    return before && seconds - before.seconds <= spacing ? before.level : 0;
+  }
+  return !before || after.seconds - seconds < seconds - before.seconds ? after.level : before.level;
 }
 
 /**
- * The loudness levels an environment measured for a synthesis, as they arrive, by seconds into its
- * audio. Players whose audio sampling misses streamed audio draw their meter from these.
- */
-export function createSpeechLevels() {
-  let windowSeconds = 0;
-  const values: number[] = [];
-  return {
-    /** Levels received so far, which the next request continues after. */
-    get count() {
-      return values.length;
-    },
-    add(levels: SpeechSynthesisLevels) {
-      // A batch that skips levels would misplace every later one.
-      if (levels.start > values.length || !(levels.windowSeconds > 0)) return;
-      windowSeconds = levels.windowSeconds;
-      values.length = levels.start;
-      for (const value of levels.values) values.push(value / SPEECH_SYNTHESIS_LEVEL_STEPS);
-    },
-    /** From 0 to 1; silent past the levels received; `undefined` until any arrive. */
-    at(seconds: number) {
-      if (!values.length) return undefined;
-      // The epsilon keeps a window's own start, such as 0.15 / 0.05, inside that window.
-      return values[Math.floor(Math.max(0, seconds) / windowSeconds + 1e-9)] ?? 0;
-    },
-  };
-}
-
-/**
- * Follows a synthesis' word timings on its audio clock. Players call `refresh` on each media event
- * that moves the clock; between events one timer waits for the next word, not a frame loop.
- * Words come from the environment; when it sends none, they are estimated once it reports the
- * audio length.
+ * Follows a synthesis' word timings on its audio clock; players call `refresh` when the clock
+ * moves. Words missing from the environment are estimated once it reports the audio length.
+ * `levels` also follows the loudness it measured, for players that cannot measure their audio.
  */
 export function createTimedWords(input: {
   readonly text: string;
-  /** `levelsAfter` asks for loudness levels too; loaders that ignore it get none. */
   readonly load: (
     after: number,
+    levelsAfter: number | undefined,
     signal: AbortSignal,
-    levelsAfter: number,
   ) => Promise<SpeechSynthesisTimings>;
   readonly clock: () => PlaybackClock;
+  readonly levels?: boolean;
 }) {
   const loading = new AbortController();
-  const levels = createSpeechLevels();
   const listeners = new Set<(word: SpokenWord | null) => void>();
   let words: ReadonlyArray<SpeechSynthesisWord> = [];
+  const levels: SpeechSynthesisLevel[] = [];
+  let estimated = false;
   let current = -1;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = () => {
@@ -200,12 +181,18 @@ export function createTimedWords(input: {
   const load = async () => {
     const received: SpeechSynthesisWord[] = [];
     for (;;) {
-      const timings = await input.load(received.length, loading.signal, levels.count);
+      const timings = await input.load(
+        received.length,
+        input.levels ? levels.length : undefined,
+        loading.signal,
+      );
       received.push(...timings.words);
-      if (timings.levels) levels.add(timings.levels);
+      levels.push(...(timings.levels ?? []));
       words = received;
-      if (timings.done && words.length === 0 && timings.durationSeconds)
+      if (timings.done && words.length === 0 && timings.durationSeconds) {
         words = estimateWordTimings(input.text, timings.durationSeconds);
+        estimated = true;
+      }
       refresh();
       if (timings.done) return;
     }
@@ -220,10 +207,30 @@ export function createTimedWords(input: {
       };
     },
     refresh,
-    /** How loud the audio is `seconds` in, from 0 to 1; `undefined` until levels arrive. */
-    levelAt: (seconds: number) => levels.at(seconds),
+    /**
+     * Reports the measured loudness at the playing position each meter interval, smoothed as a
+     * player measuring its own audio would; returns the way to stop.
+     */
+    followLevels: (listener: (level: number) => void) => {
+      let level = 0;
+      // @effect-diagnostics-next-line globalTimers:off - Players call this outside an Effect runtime.
+      const timer = setInterval(() => {
+        const clock = input.clock();
+        const next = smoothReadAloudLevel(
+          level,
+          clock.playing ? levelAt(levels, clock.seconds) : 0,
+        );
+        if (next !== level) listener((level = next));
+      }, READ_ALOUD_LEVEL_INTERVAL_MS);
+      return () => {
+        clearInterval(timer);
+        listener(0);
+      };
+    },
     /** When the word holding offset `at` starts, once its timing has arrived. */
     secondsAt: (at: number) => {
+      // An estimate can land words early or late, so seeking to one skips or repeats speech.
+      if (estimated) return undefined;
       const index = words.findIndex((word) => word.end > at);
       return index === -1 ? undefined : words[index]!.startSeconds;
     },
@@ -242,12 +249,15 @@ function spokenWordStart(speech: ReadAloudSpeech, from: number) {
 }
 
 export function createReadAloudController(
+  /** `from` is the offset in `text` where the audio should start, after a spoken lead-in. */
   prepare: (
     text: string,
     settings: ReadAloudSettings,
     signal: AbortSignal,
     /** The blocks of `text`, so environments synthesize and cache each block alone. */
     blocks: ReadonlyArray<SpeechSynthesisBlock>,
+    /** Where in `text` the audio starts; the text before it is spoken only for context. */
+    from?: number,
   ) => Promise<SpeechPlayback>,
   resolve: MFunctionType = mFallback,
   /** Words for the reply's formulas when replies render them, so they are not read as TeX. */
@@ -273,8 +283,10 @@ export function createReadAloudController(
   };
   let paused = false;
   let starting = false;
-  // The spoken range of the chunk `playback` speaks, and the word it is on, for seeking.
+  // The spoken range of the chunk `playback` speaks, and the word it is on, for seeking. Its
+  // audio begins at `chunkFrom`, after any lead-in that was spoken only for context.
   let chunkStart = 0;
+  let chunkFrom = 0;
   let chunkEnd = 0;
   let spokenAt = 0;
   const levelListeners = new Set<(level: number) => void>();
@@ -324,7 +336,7 @@ export function createReadAloudController(
     readonly id: string;
     readonly markdown: string;
     readonly settings: ReadAloudSettings;
-    readonly speakMath: SpeakMath | undefined;
+    readonly words: ReadAloudWords;
   } | null = null;
   const stop = () => {
     reading = null;
@@ -351,11 +363,14 @@ export function createReadAloudController(
     from?: number,
     fromWord = false,
   ) => {
-    // Only replies with formulas wait for them, so others start reading in the same turn.
+    // Only replies with formulas or emoji wait for their words, so others start in the same turn.
     const pendingMath = prepareMath(markdown);
-    const speakMath =
-      pendingMath instanceof Promise ? await pendingMath.catch(() => undefined) : pendingMath;
-    const speech = readAloudSpeech(markdown, settings.skipCodeBlocks, speakMath);
+    const pendingEmoji = prepareReadAloudEmoji(markdown);
+    const words: ReadAloudWords = {
+      math: pendingMath instanceof Promise ? await pendingMath.catch(() => undefined) : pendingMath,
+      emoji: pendingEmoji && (await pendingEmoji.catch(() => undefined)),
+    };
+    const speech = readAloudSpeech(markdown, settings.skipCodeBlocks, words);
     const offset =
       from === undefined
         ? 0
@@ -366,12 +381,18 @@ export function createReadAloudController(
     if (offset === undefined) return;
     stop();
     if (settings.provider === "off") return;
-    reading = { id, markdown, settings, speakMath };
+    reading = { id, markdown, settings, words };
+    // Environments make speech picked up mid-sentence from the sentence's start, for context.
+    // Platform engines cannot start partway into their audio, so they start at the word.
+    const leadIn =
+      fromWord && settings.provider !== "system"
+        ? readAloudSentenceStart(speech.text, offset)
+        : offset;
     // Platform speech engines cap utterance length; environments stream a whole reply.
     const chunks = splitReadAloudSpans(
-      speech.text.slice(offset),
+      speech.text.slice(leadIn),
       settings.provider === "system" ? undefined : SPEECH_SYNTHESIS_MAX_TEXT,
-    ).map((chunk) => ({ ...chunk, start: offset + chunk.start }));
+    ).map((chunk) => ({ ...chunk, start: leadIn + chunk.start }));
     if (!chunks.length) return;
     const owner = new AbortController();
     active = owner;
@@ -386,15 +407,23 @@ export function createReadAloudController(
             end: block.spokenEnd - chunk.start,
             markdown: block.markdown.length <= SPEECH_SYNTHESIS_MAX_TEXT ? block.markdown : "",
           }));
-        const next = await prepare(chunk.text, settings, owner.signal, blocks);
+        const from = Math.max(0, Math.min(offset, end) - chunk.start);
+        const next = await prepare(
+          chunk.text,
+          settings,
+          owner.signal,
+          blocks,
+          from > 0 ? from : undefined,
+        );
         if (active !== owner) {
           dispose(next);
           return;
         }
         playback = next;
         chunkStart = chunk.start;
+        chunkFrom = chunk.start + from;
         chunkEnd = chunk.start + chunk.text.length;
-        spokenAt = chunk.start;
+        spokenAt = chunkFrom;
         if (next.words)
           unfollow = next.words((word) => {
             if (word) spokenAt = chunk.start + word.start;
@@ -514,11 +543,11 @@ export function createReadAloudController(
       const speech = readAloudSpeech(
         reading.markdown,
         reading.settings.skipCodeBlocks,
-        reading.speakMath,
+        reading.words,
       );
       const at = spokenWordStart(speech, from);
       if (at === undefined) return null;
-      if (at >= chunkStart && at < chunkEnd && playback?.seek?.(at - chunkStart))
+      if (at >= chunkFrom && at < chunkEnd && playback?.seek?.(at - chunkStart))
         return Promise.resolve();
       return start(id, reading.markdown, reading.settings, from, true);
     },
@@ -534,7 +563,7 @@ export function createReadAloudController(
       const speech = readAloudSpeech(
         current.markdown,
         current.settings.skipCodeBlocks,
-        current.speakMath,
+        current.words,
       );
       const from = speech.sources.slice(spokenAt).find((source) => source >= 0);
       return from === undefined
