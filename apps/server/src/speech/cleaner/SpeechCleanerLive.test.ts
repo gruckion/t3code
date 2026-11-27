@@ -294,3 +294,28 @@ it.effect("table cells reach the narrator with paths cleaned and links as their 
 it("settings can turn off every rule the cleaner runs", () => {
   expect(SpeechCleanerLive.ruleIds).toEqual(ReadAloudCleanerRule.literals);
 });
+
+it.effect("speech spells out numbers with thousands separators", () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      [
+        "The backfill is at 4,064,078 of 4,735,297 events.",
+        "The backfill is at four million sixty-four thousand seventy-eight of four million seven hundred thirty-five thousand two hundred ninety-seven events.",
+      ],
+      [
+        "It costs $1,200.50 a year.",
+        "It costs one thousand two hundred point five zero dollars a year.",
+      ],
+      [
+        "About 1,000,000 rows, and 2,000 > 1,500.",
+        "About one million rows, and two thousand is greater than one thousand five hundred.",
+      ],
+      ["Run `seq 1,000`, then pick 1,2,3.", "Run `seq 1,000`, then pick 1,2,3."],
+      ["Small numbers like 42 and 2026 stay.", "Small numbers like 42 and 2026 stay."],
+    ];
+    for (const [input, expected] of cases) {
+      const result = yield* clean(input);
+      expect(result.text).toBe(expected);
+    }
+  }),
+);

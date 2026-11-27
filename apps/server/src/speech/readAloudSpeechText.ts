@@ -23,7 +23,7 @@ import * as ReadAloudCache from "./readAloudCache.ts";
 import { spokenTextMap, type TextRange } from "./spokenTextMap.ts";
 
 /** Change it when the cleaner's rules change, so cached rewrites are made again. */
-const CLEANER_VERSION = "2";
+const CLEANER_VERSION = "3";
 const DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1";
 /** A block waits this long for its rewrite; a later one plays it, and its audio is cached then. */
 const REWRITE_WAIT = "15 seconds";
@@ -176,7 +176,8 @@ const make = Effect.gen(function* () {
     const jevApiKey = Option.orElse(setting(yield* secret(saved.jevApiKey)), () =>
       setting(env.jevApiKey),
     );
-    if (Option.isNone(jevApiKey)) return null;
+    // Without Jev only hash recognition is off: the other rules run on this machine.
+    const jev = Option.getOrNull(jevApiKey);
     const llmApiKey = Option.orElse(setting(yield* secret(saved.narrationApiKey)), () =>
       Option.orElse(setting(env.llmApiKey), () => setting(env.openAiApiKey)),
     );
@@ -196,27 +197,33 @@ const make = Effect.gen(function* () {
     const configuration = [
       CLEANER_VERSION,
       narrator ? `${llmBaseUrl} ${narrator.model}` : "",
-      `${JEV_DEFAULT_API_URL} ${JEV_DEFAULT_MODEL}`,
+      jev === null ? "no hash classifier" : `${JEV_DEFAULT_API_URL} ${JEV_DEFAULT_MODEL}`,
       `off: ${disabledRules.join(",")}`,
     ];
-    const fingerprint = [...configuration, jevApiKey.value, narrator ? narrator.apiKey : ""].join(
-      "\u0000",
-    );
+    const fingerprint = [
+      ...configuration,
+      jev === null ? "" : jev,
+      narrator ? narrator.apiKey : "",
+    ].join("\u0000");
     return yield* lock.withPermits(1)(
       Effect.gen(function* () {
         if (built?.fingerprint === fingerprint) return built.cleaner;
         const settings: ProviderSettings = {
           enabled: narrator !== null,
           codeEnabled: narrator !== null,
-          hashEnabled: true,
+          hashEnabled: jev !== null,
           apiKey: Redacted.make(narrator ? narrator.apiKey : ""),
           apiUrl: llmBaseUrl,
           model: narrator ? narrator.model : "",
-          classifier: {
-            apiKey: Redacted.make(jevApiKey.value),
-            model: JEV_DEFAULT_MODEL,
-            apiUrl: JEV_DEFAULT_API_URL,
-          },
+          ...(jev === null
+            ? {}
+            : {
+                classifier: {
+                  apiKey: Redacted.make(jev),
+                  model: JEV_DEFAULT_MODEL,
+                  apiUrl: JEV_DEFAULT_API_URL,
+                },
+              }),
         };
         const scope = yield* Scope.fork(layerScope);
         const context = yield* Layer.buildWithScope(

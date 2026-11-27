@@ -71,14 +71,13 @@ describe("read aloud speech text", () => {
         const upstream = vi.fn<typeof fetch>(async () => new Response("offline", { status: 503 }));
         const program = Effect.gen(function* () {
           const settings = yield* ServerSettings.ServerSettingsService;
-          // No Jev key in settings or the environment: the block reads as its plain text.
-          expect(yield* speak("Open `src/main.ts`.", "Open src/main.ts.")).toEqual({
-            text: "Open src/main.ts.",
-            words: ["Open", "src/main.ts."],
-          });
-          yield* settings.updateSettings({ readAloudCleaner: { jevApiKey: "jev-key" } });
+          // No Jev key in settings or the environment: the rules that need no model still run.
           expect((yield* speak("Open `src/main.ts`.", "Open src/main.ts.")).text).toBe(
             "Open src main.ts.",
+          );
+          yield* settings.updateSettings({ readAloudCleaner: { jevApiKey: "jev-key" } });
+          expect((yield* speak("Open `src/fourth.ts`.", "Open src/fourth.ts.")).text).toBe(
+            "Open src fourth.ts.",
           );
           yield* settings.updateSettings({ readAloudCleaner: { disabledRules: ["file-paths"] } });
           expect((yield* speak("Open `src/other.ts`.", "Open src/other.ts.")).text).toBe(
@@ -87,6 +86,10 @@ describe("read aloud speech text", () => {
           yield* settings.updateSettings({ readAloudCleaner: { jevApiKey: "" } });
           expect((yield* speak("Open `src/third.ts`.", "Open src/third.ts.")).text).toBe(
             "Open src/third.ts.",
+          );
+          yield* settings.updateSettings({ readAloudCleaner: { disabledRules: [] } });
+          expect((yield* speak("At 4,064,078 rows.", "At 4,064,078 rows.")).text).toBe(
+            "At four million sixty-four thousand seventy-eight rows.",
           );
         });
         yield* program.pipe(

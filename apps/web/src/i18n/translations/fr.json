@@ -9662,6 +9662,8 @@
   "5c2bc7a7fd58cf2d": "Read quoted text without the quote markers.",
   "7c07afe790d1f072": "Comparisons",
   "081f8e0a6ed4ee74": "Read symbols such as >= and != as words.",
+  "bb885ce6a53d60d9": "Numbers",
+  "fd2d359b9ce677cc": "Read numbers with commas, such as 4,064,078, as words.",
   "cd0c73d22740762d": "Speech cleaner",
   "acab7eb180427dbb": "Rewrites each reply so the voice reads paths, links, hashes, and code naturally. Jev, and the narration model when set, receive the reply text.",
   "3e76c798d0067523": "Add a Jev API key to rewrite replies for speech. Without one, replies read as written, unless the environment sets {variable}.",
