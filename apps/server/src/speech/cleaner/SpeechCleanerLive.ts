@@ -16,7 +16,6 @@ import { filePaths } from "./replacers/filePaths.ts";
 import { hashes } from "./replacers/hashes.ts";
 import { markdownTables } from "./replacers/markdownTables.ts";
 import { migrationFiles } from "./replacers/migrationFiles.ts";
-import { numbers } from "./replacers/numbers.ts";
 import { separators } from "./replacers/separators.ts";
 import { urls } from "./replacers/urls.ts";
 
@@ -24,7 +23,7 @@ import { urls } from "./replacers/urls.ts";
  * Unwrap blocks first. Clean inline references before tables: the narrator often drops the
  * backticks around a path, and later rules would then leave its slashes in.
  * Comparisons come last: a leading `>` must first be read as a quote marker, and a narrated
- * table can contain one. Numbers follow them, because both rules read digits such as `1,000`.
+ * table can contain one.
  */
 const replacers: ReadonlyArray<
   Replacer<
@@ -41,7 +40,6 @@ const replacers: ReadonlyArray<
   markdownTables,
   blockquotes,
   comparisons,
-  numbers,
 ];
 
 /** Settings name rules by these ids, in the order they run. */

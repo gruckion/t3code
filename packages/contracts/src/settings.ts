@@ -1421,7 +1421,6 @@ export const ReadAloudCleanerRule = Schema.Literals([
   "markdown-tables",
   "blockquotes",
   "comparisons",
-  "numbers",
 ]);
 export type ReadAloudCleanerRule = typeof ReadAloudCleanerRule.Type;
 

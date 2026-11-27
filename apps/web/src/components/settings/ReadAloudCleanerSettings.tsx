@@ -142,10 +142,6 @@ export function ReadAloudCleanerSettings({ environmentId }: { environmentId: Env
       title: gt("Comparisons"),
       description: gt("Read symbols such as >= and != as words."),
     },
-    numbers: {
-      title: gt("Numbers"),
-      description: gt("Read numbers with commas, such as 4,064,078, as words."),
-    },
   };
   const enabled = cleaner.jevApiKey !== "";
   return (
